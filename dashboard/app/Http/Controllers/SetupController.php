@@ -63,7 +63,7 @@ class SetupController extends Controller
     public const BRANDS_HREF = '/batch-automation#run-brands';
 
     /** ملاحظة كلفة زر فحص المفاتيح (نفس فحص الاتصالات بصفحة الصحة). */
-    public const KEYS_TEST_NOTE = 'بيستعمل استعلام Serper واحد وطلب PhotoRoom واحد، وما بياخد أكتر من 45 ثانية.';
+    public const KEYS_TEST_NOTE = 'بيكلّف بحث صور واحد وطلب عزل خلفية واحد، وما بياخد أكتر من 45 ثانية.';
 
     // ------------------------------------------------------------------
     // Pages and endpoints
@@ -586,14 +586,14 @@ class SetupController extends Controller
                 $rows[] = self::row($key, $label, $state, 'muted', 'اضغط «افحص المفاتيح» لتتأكد إنو شغّال.');
             }
         };
-        $add('serper', 'Serper · البحث عن الصور', $byId['serper'] ?? null);
-        $add('gemini', 'Gemini · قراءة الملصق', $byId['gemini'] ?? null);
+        $add('serper', 'البحث عن الصور · Serper', $byId['serper'] ?? null);
+        $add('gemini', 'قارئ الملصق · Gemini', $byId['gemini'] ?? null);
 
         $method = (string) $facts['bg_method'];
         if ($method === 'remove_bg_api') {
             $rows[] = $facts['removebg_key']
-                ? self::row('bg', 'remove.bg · عزل الخلفية', 'محفوظ بملف ‎.env (بيبين شغلو ببروفة النشر)', 'success')
-                : self::row('bg', 'remove.bg · عزل الخلفية', 'غير محفوظ', 'warning',
+                ? self::row('bg', 'عزل الخلفية · remove.bg', 'محفوظ بملف ‎.env (بيبين شغلو ببروفة النشر)', 'success')
+                : self::row('bg', 'عزل الخلفية · remove.bg', 'غير محفوظ', 'warning',
                     'مفتاح remove.bg بينحط بملف .env (REMOVE_BG_API_KEY)، أو رجّع طريقة العزل لـ PhotoRoom من «معالجة الصور».',
                     '/settings?tab=processing', 'معالجة الصور');
             $any['todo'] = $any['todo'] || !$facts['removebg_key'];
@@ -602,9 +602,9 @@ class SetupController extends Controller
         } elseif ($method === 'none') {
             $rows[] = self::row('bg', 'عزل الخلفية', 'متوقف: ما بدو مفتاح', 'success');
         } else {
-            $add('bg', 'PhotoRoom · عزل الخلفية', $byId['photoroom'] ?? null);
+            $add('bg', 'عزل الخلفية · PhotoRoom', $byId['photoroom'] ?? null);
         }
-        $add('cloudinary', 'Cloudinary · رفع الصور النهائية', $byId['cloudinary'] ?? null);
+        $add('cloudinary', 'رفع الصور · Cloudinary', $byId['cloudinary'] ?? null);
 
         $status = $any['fail'] ? 'fail' : ($any['todo'] ? 'todo' : 'ok');
         $summary = match ($status) {

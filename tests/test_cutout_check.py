@@ -22,7 +22,8 @@ from test_reprocess_transparent import (BASE, JUICE, JUICE_URL, LABAN, LABAN_URL
 
 CONTROLLER = DASH / "app" / "Http" / "Controllers" / "RecutController.php"
 ROUTES = DASH / "routes" / "web.php"
-VIEW = DASH / "resources" / "views" / "dashboard" / "cutout_check.blade.php"
+CATALOG = DASH / "resources" / "views" / "dashboard" / "catalog.blade.php"
+SHELL = DASH / "resources" / "views" / "review" / "shell.blade.php"
 JS = DASH / "public" / "js" / "review" / "cutout.js"
 CSS = DASH / "public" / "css" / "pages" / "cutout.css"
 REVIEW_CSS = DASH / "public" / "css" / "pages" / "review.css"
@@ -51,13 +52,16 @@ def test_routes_page_and_scripts():
                  f"Route::post('/api/cutout/undo', [{c}::class, 'undo']);",
                  f"Route::get('/api/cutout/preview/{{token}}', [{c}::class, 'preview'])"):
         assert line in routes, line
-    view, js = read(VIEW), read(JS)
-    assert "@section('lq_nav', 'review')" in view and "فحص القص" in view
-    for name in ("theme_preview.js", "ui.js", "cutout.js"):
-        assert f"js/review/{name}" in view, name
-    assert view.index("'js/review/theme_preview.js'") < view.index("'js/review/cutout.js'")
-    for hook in set(__import__("re").findall(r"part\('([a-z-]+)'\)", js)):
-        assert f'data-cq="{hook}"' in view, hook
+    # the review screen loads it: its CSS, and cutout.js after ui.js and before app.js (which mounts it)
+    view, js = read(CATALOG), read(JS)
+    assert "css/pages/cutout.css" in view and "js/review/theme_preview.js" in view
+    assert "['core', 'ui', 'jobs', 'single', 'bulk', 'cutout', 'app']" in view
+    assert not (DASH / "resources" / "views" / "dashboard" / "cutout_check.blade.php").exists()
+    assert "fn (string $path)" in view and "@section('lq_nav', 'review')" in view
+    # cutout.js builds its own parts (no page skeleton to find them in)
+    for hook in ("filters", "status", "grid", "pager", "log", "log-list"):
+        assert f"dataset: {{ cq: '{hook}' }}" in js, hook
+    assert "function mount(container, opts)" in js and "unmount" in js and "getElementById('cqApp')" not in js
     assert "innerHTML" not in js and "insertAdjacentHTML" not in js and "eval(" not in js
     assert "R.themePreview.apply(stage, mode)" in js                       # the review screen's preview, reused
     import cli_bridge
@@ -72,10 +76,16 @@ def test_every_class_the_page_uses_is_defined():
     for path in (CSS, REVIEW_CSS, LAQTA_CSS):
         css = re.sub(r"/\*.*?\*/", "", read(path), flags=re.DOTALL)
         defined |= set(re.findall(r"\.([a-z][a-z0-9_]*(?:(?:__|--|-)[a-z0-9_]+)*)", css))
-    view, js = read(VIEW), read(JS)
+    view, js = read(SHELL), read(JS)
     groups = re.findall(r'class="([^"]+)"', view) + re.findall(r"className: '([^']+)'", js)
     used = {c for g in groups for c in g.split() if not c.endswith("-")}
-    assert {"cq-card", "cq-stage", "cq-flag", "cq-log__item", "lq-filter"} <= used
+    assert {"cq-card", "cq-stage", "cq-flag", "cq-log__item", "lq-filter", "cq__h1", "cq-mode"} <= used
+    # next to review.css on one page: the cutout classes are cq-* only, and review.css defines none of them
+    page_only = set(re.findall(r"\.([a-z][a-z0-9_-]*)", re.sub(r"/\*.*?\*/", "", read(CSS), flags=re.DOTALL)))
+    review = set(re.findall(r"\.([a-z][a-z0-9_-]*)", re.sub(r"/\*.*?\*/", "", read(REVIEW_CSS), flags=re.DOTALL)))
+    own = {c for c in page_only if not c.startswith(("rv-theme", "rv-img-missing", "lq-"))}
+    assert own and all(c.startswith("cq") for c in own), sorted(own)
+    assert not {c for c in review if c.startswith("cq")}
     missing = sorted(used - defined)
     assert not missing, missing
     text = read(CSS)
@@ -320,12 +330,17 @@ def calls_of(app):
 
 
 def test_the_page_renders_and_runs_nothing(cutout_app):
-    (page,) = _kernel(cutout_app["env"], [["GET", "/cutout-check", {}]])
+    old, page = _kernel(cutout_app["env"], [["GET", "/cutout-check", {}], ["GET", "/catalog?mode=cutout", {}]])
+    assert old["status"] == 302 and old["location"].endswith("/catalog?mode=cutout")
     assert page["status"] == 200
     body = page["body"]
-    assert 'id="cqApp"' in body and "فحص القص" in body and "js/review/cutout.js" in body
+    assert 'id="rvApp"' in body and 'data-mode="cutout"' in body and "فحص القص" in body and "js/review/cutout.js" in body
+    assert 'class="cq-mode"' in body and "css/pages/cutout.css" in body
     config = json.loads(__import__("html").unescape(body.split('data-config="', 1)[1].split('"', 1)[0]))
-    assert config["urls"]["gallery"].endswith("/api/cutout/gallery") and config["flags"][0] == "white"
+    assert config["mode"] == "cutout" and config["modeExplicit"] is True
+    cutout = config["cutout"]
+    assert cutout["urls"]["gallery"].endswith("/api/cutout/gallery") and cutout["flags"][0] == "white"
+    assert config["urls"]["cutoutCheck"].endswith("/catalog?mode=cutout")
     assert calls_of(cutout_app) == []
 
 

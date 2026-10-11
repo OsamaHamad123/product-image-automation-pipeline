@@ -67,7 +67,7 @@
                 <summary>خيارات متقدمة</summary>
                 <div class="lq-run-advanced__body">
                     <label class="lq-check"><input type="checkbox" data-run="force"><span>إعادة البحث حتى للمنتجات اللي إلها صورة نهائية</span></label>
-                    <p class="lq-run-advanced__hint">منبحث من جديد عن كل منتجات النطاق، حتى اللي إلها صورة نهائية أو بانتظار مراجعتك. الصورة المنشورة بالشيت بتضل مكانها لحد ما تعتمد غيرها، وما بينكتب أبداً فوق صورة اعتمدها مراجع.</p>
+                    <p class="lq-run-advanced__hint">الصورة المنشورة بتضل مكانها لحد ما تعتمد غيرها، وما بينكتب أبداً فوق صورة اعتمدها مراجع.</p>
                     <label class="lq-check"><input type="checkbox" data-run="skip-cache"><span>تجاهل النتائج المحفوظة والبحث من جديد</span></label>
                     <p class="lq-run-advanced__hint">ما منستعمل الصور اللي انلقت قبل هيك، فالبحث أبطأ وأغلى شوي.</p>
                 </div>
@@ -156,7 +156,8 @@
                 <x-lq.icon name="alert" :size="18" class="lq-alert__icon" />
                 <div class="lq-alert__body">
                     <strong class="lq-alert__title">التشغيل عالق:</strong> <span data-run="stuck-reason"></span>
-                    <p class="lq-run-stuck__what">«إصلاح تشغيل عالق» بيوقف أي عامل عالق، وبيمسح حالة التشغيل والتنبيه، وبيرجّع المنتجات العالقة للطابور. ما بيحذف ولا منتج جاهز للمراجعة أو معتمد أو فاشل، ولا أي اقتراح أو قرار مراجعة.</p>
+                    <p class="lq-run-stuck__what">«إصلاح تشغيل عالق» بيرجّع المنتجات العالقة للطابور، وما بيحذف ولا منتج ولا قرار مراجعة.</p>
+                    <details><summary class="lq-link">تفاصيل</summary><p class="lq-field__hint">بيوقف أي عامل عالق، وبيمسح حالة التشغيل والتنبيه، وبيرجّع المنتجات العالقة للطابور. ما بيحذف ولا منتج جاهز للمراجعة أو معتمد أو فاشل، ولا أي اقتراح أو قرار مراجعة.</p></details>
                     <button type="button" class="lq-btn lq-btn--secondary lq-btn--sm" data-run="reset"><x-lq.icon name="refresh" :size="16" :stroke="2" />إصلاح تشغيل عالق</button>
                 </div>
             </div>
@@ -199,8 +200,9 @@
             <div class="lq-run-bulk" data-run="bulk" data-state="idle">
                 <div class="lq-run-brands__foot">
                     <button type="button" class="lq-btn lq-btn--primary" data-run="bulk-open">عبّي جدول الماركات</button>
-                    <span class="lq-field__hint">اقتراح لكل الماركات الناقصة مرة وحدة، من الأدلة اللي عنا بس (المراجعات، فهرس المتاجر، المواقع اللي لقيناها). ما بيصرف أي بحث.</span>
+                    <span class="lq-field__hint">اقتراح لكل الماركات الناقصة مرة وحدة، وما بيصرف أي بحث.</span>
                 </div>
+                <details><summary class="lq-link">تفاصيل</summary><p class="lq-field__hint">الاقتراح من الأدلة اللي عنا بس (المراجعات، فهرس المتاجر، المواقع اللي لقيناها)، وما بينكتب شي قبل ما تعتمده.</p></details>
                 <div class="lq-run-bulk__panel" data-run="bulk-panel" hidden>
                     <p class="lq-run-brands__lead" data-run="bulk-lead" aria-live="polite"></p>
                     <div class="lq-run-brands__foot" data-run="bulk-tools" hidden>
@@ -209,7 +211,7 @@
                     </div>
                     <div class="lq-run-barcodes__list lq-run-bulk__list" data-run="bulk-list"></div>
                     <div class="lq-run-brands__foot" data-run="bulk-foot" hidden>
-                        <button type="button" class="lq-btn lq-btn--primary" data-run="bulk-approve">اعتمد المحدد</button>
+                        <button type="button" class="lq-btn lq-btn--secondary" data-run="bulk-approve">اعتمد المحدد</button>
                         <span class="lq-field__hint" data-run="bulk-count"></span>
                     </div>
                     <div class="lq-run-bulk__added-list" data-run="bulk-added" hidden></div>
@@ -234,7 +236,7 @@
             <div class="lq-run-barcodes__list" data-run="barcodes-list"></div>
             <div class="lq-run-barcodes__list lq-run-barcodes__apart" data-run="barcodes-apart" hidden></div>
             <div class="lq-run-brands__foot" data-run="barcodes-foot" hidden>
-                <button type="button" class="lq-btn lq-btn--primary" data-run="barcodes-write">اكتب الباركودات المختارة بالشيت</button>
+                <button type="button" class="lq-btn lq-btn--secondary" data-run="barcodes-write">اكتب الباركودات المختارة بالشيت</button>
                 <span class="lq-field__hint" data-run="barcodes-count"></span>
             </div>
             <p class="lq-field__error" role="alert" data-run="barcodes-error" hidden></p>
@@ -257,7 +259,8 @@
         {{-- One JSON file of a run for analysis (GET /api/run/export): no new search, no cost, no key --}}
         <section class="lq-card lq-run-export" id="run-export" aria-labelledby="run-export-title">
             <h2 class="lq-card__title" id="run-export-title">تقرير للتحليل</h2>
-            <p class="lq-run-export__text">ملف واحد فيه كل صفوف التشغيل: القرار، وليش ما في اقتراح، وأفضل 8 صور مع أدلتها، والتكلفة إذا معروفة. ما بيعمل بحث جديد وما بيكلّف شي، وما فيه أي مفتاح أو كلمة سر. ابعته للمطوّر بدل ما تبعت ملفات.</p>
+            <p class="lq-run-export__text">ملف واحد بتبعته للمطوّر بدل ما تبعت ملفات؛ ما بيكلّف شي وما فيه أي مفتاح أو كلمة سر.</p>
+            <details><summary class="lq-link">تفاصيل</summary><p class="lq-field__hint">فيه كل صفوف التشغيل: القرار، وليش ما في اقتراح، وأفضل 8 صور مع أدلتها، والتكلفة إذا معروفة. ما بيعمل بحث جديد.</p></details>
             <label class="lq-field">
                 <span class="lq-field__label">شو بدك تصدّر؟</span>
                 <select class="lq-select" data-run="export-scope">

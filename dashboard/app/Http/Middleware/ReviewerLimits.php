@@ -30,14 +30,16 @@ class ReviewerLimits
         'api/review/explain-backfill',    // بتطلبه الشاشة لحالها: أسباب «بلا اقتراح» (بلا بحث وبلا تكلفة)
     ];
 
-    // صفحات للمدير بس حتى للقراءة: الإعدادات والمفاتيح، التشغيل، التجهيز، فحص القص
+    // صفحات للمدير بس حتى للقراءة: الإعدادات والمفاتيح، التشغيل، التجهيز. «فحص القص» صار وضع بالمراجعة: /cutout-check
+    // بيحوّل لـ /catalog?mode=cutout، والمراجع بيوصل على «منتج واحد» (ReviewController::page)؛ كبسات القص POST فمش إله
     public const ADMIN_PAGES = [
         'settings',
         'active-learning',                // بتحوّل للإعدادات
         'batch-automation',
         'setup',
         'api/setup/*',
-        'cutout-check',
+        // «فحص القص» (وضع بالمراجعة للمدير بس): المعرض وقياسه (measure=1 بيفحص لحد 24 صورة) والمعاينات كمان
+        'api/cutout/*',
     ];
 
     public const DENIED = 'هالعملية للمدير بس';

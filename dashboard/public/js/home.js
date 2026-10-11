@@ -142,7 +142,7 @@
                 title: startFailed ? 'التشغيل اللي قبله' : 'آخر تشغيل',
                 meta: C.runMeta(run, nowMs),
                 tiles: C.resultTiles(run.counts),
-                explain: (startFailed ? 'آخر محاولة تشغيل وقفت قبل ما تبحث عن ولا منتج (السبب بالشريط فوق). ' : '') +
+                explain: (startFailed ? 'آخر محاولة وقفت قبل أول بحث (السبب بالشريط فوق). ' : '') +
                     String(run.explain || '')
             };
         } else {
@@ -481,9 +481,17 @@
             }
         }
 
+        // the header's «افتح قائمة المراجعة» goes away while the next step already leads to the same list (one action)
+        function samePlace(a, b) {
+            var strip = function (h) { return String(h || '').replace(/^[a-z]+:\/\/[^/]+/i, '').replace(/#.*$/, ''); };
+            return strip(a) !== '' && strip(a) === strip(b);
+        }
+
         function renderNext(view) {
             var box = $('next');
             C.setHidden(box, !view);
+            var reviewLink = $('review-link');
+            if (reviewLink) C.setHidden(reviewLink, !!view && samePlace(reviewLink.getAttribute('href'), view.href));
             if (!view) return;
             box.setAttribute('data-step', view.key);
             C.setText($('next-title'), view.title);

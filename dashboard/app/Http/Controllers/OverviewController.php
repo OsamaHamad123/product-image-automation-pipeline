@@ -323,8 +323,9 @@ class OverviewController extends Controller
         return [
             'bar_pct' => (int) round($bar * 100),
             'perfect_record_reviews' => $perfect,
-            'intro' => 'الماركة بتصير جاهزة لما يثبت فيها الاقتراح صحيح بنسبة مضمونة ' . (int) round($bar * 100) . '%.'
-                . ($perfect > 0 ? ' هاد بيحتاج حوالي ' . $perfect . ' مراجعة صحيحة بدون ولا غلطة.' : ''),
+            'intro' => $perfect > 0
+                ? 'الماركة بتصير جاهزة للنشر الآلي بعد حوالي ' . $perfect . ' مراجعة صحيحة بدون ولا غلطة.'
+                : 'الماركة بتصير جاهزة للنشر الآلي لما مراجعاتك تثبت إن اقتراحاتها صحيحة تقريباً دايماً.',
             'brands' => array_slice($brands, 0, $limit),
             'more' => max(0, count($brands) - $limit),
         ];

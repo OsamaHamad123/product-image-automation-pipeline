@@ -1,7 +1,9 @@
-"""«فحص القص» in a real browser: the page as the Laravel app renders it (through its HTTP kernel, no database), the real
-CSS and scripts (theme_preview.js, ui.js, cutout.js, the layout's), the data calls answered by the test (Chromium
-through Playwright for node; skipped when php, dashboard/vendor, node Playwright or Chromium is missing).
+"""«فحص القص» in a real browser: the review screen's cutout mode (/catalog?mode=cutout) as the Laravel app renders it
+(through its HTTP kernel, no database), the real CSS and scripts (theme_preview.js, the review scripts with cutout.js,
+the layout's), the data calls answered by the test (Chromium through Playwright for node; skipped when php,
+dashboard/vendor, node Playwright or Chromium is missing).
 
+* the review screen's toggle «منتج واحد | بالجملة | فحص القص» with the third one on; 2-3 card columns at 1440;
 * every picture on dark, light and checker side by side; a filter shows only its pictures;
 * «أعد القص بـPhotoRoom» shows before / after and waits; «اعتمد الجديد» sends the token once and reloads; nothing is
   sent before the owner's click;
@@ -56,7 +58,7 @@ def _render(tmp_path):
 require '{DASH}/vendor/autoload.php';
 $app = require '{DASH}/bootstrap/app.php';
 $kernel = $app->make(Illuminate\\Contracts\\Http\\Kernel::class);
-$request = Illuminate\\Http\\Request::create('/cutout-check', 'GET');
+$request = Illuminate\\Http\\Request::create('/catalog?mode=cutout', 'GET');
 $response = $kernel->handle($request);
 echo json_encode(['status' => $response->getStatusCode(), 'body' => $response->getContent()], JSON_UNESCAPED_UNICODE);
 """
@@ -145,6 +147,11 @@ const path = require('path');
 const HTML = fs.readFileSync(__HTML__, 'utf8'), PUB = __PUBLIC__, FX = __FIXTURE__, IMG = __IMAGES__, SHOTS = __SHOTS__;
 const MIME = { '.css': 'text/css', '.js': 'application/javascript', '.svg': 'image/svg+xml', '.png': 'image/png' };
 const out = { errors: {}, posts: [] };
+const REVIEW = {
+  '/api/products-json': { status: 'success', products: [] },
+  '/api/review/queue-state': { status: 'success', ready_for_review: 0, rows: [], today: { approved: 0, rejected: 0 } },
+  '/api/batch-status': { status: 'idle', ready_for_review: 0 }
+};
 (async () => {
   const browser = await chromium.launch({ executablePath: __CHROME__ });
   async function open(width, height) {
@@ -174,6 +181,7 @@ const out = { errors: {}, posts: [] };
         out.posts.push(['GET', u.pathname + u.search]);
         return route.fulfill({ json: g });
       }
+      if (REVIEW[u.pathname]) return route.fulfill({ json: REVIEW[u.pathname] });   // the review screen around it
       if (req.method() === 'POST') {
         out.posts.push(['POST', u.pathname, req.postData()]);
         if (u.pathname === '/api/cutout/try') return route.fulfill({ json: FX.try });
@@ -181,7 +189,7 @@ const out = { errors: {}, posts: [] };
       }
       return route.fulfill({ json: { status: 'success' } });
     });
-    await page.goto('http://localhost/cutout-check');
+    await page.goto('http://localhost/catalog?mode=cutout');
     await page.waitForSelector('.cq-card[data-id] .cq-stage img');
     await page.waitForFunction(() => [...document.querySelectorAll('.cq-card[data-id]')].slice(0, 1)
       .every(c => [...c.querySelectorAll('img')].every(i => i.complete && i.naturalWidth > 0)));
@@ -205,6 +213,11 @@ const out = { errors: {}, posts: [] };
   {
     const { page } = await open(1440, 900);
     out.cards1440 = await page.evaluate(() => document.querySelectorAll('.cq-card[data-id]').length);
+    out.columns1440 = await page.evaluate(() => getComputedStyle(document.querySelector('.cq__grid')).gridTemplateColumns.split(' ').length);
+    // the review screen's own toggle, with the third mode on (admin)
+    out.toggle = await page.evaluate(() => [...document.querySelectorAll('.cq-mode .rv-modes__item')]
+      .map(b => [b.dataset.mode, b.getAttribute('aria-pressed')]));
+    out.hiddenModes = await page.evaluate(() => [document.querySelector('.rv-single').hidden, document.querySelector('.rv-bulk').hidden]);
     out.themes = await page.evaluate(() => [...document.querySelectorAll('.cq-card[data-id]')][0]
       .querySelectorAll('.cq-stage').length === 3 && [...[...document.querySelectorAll('.cq-card[data-id]')][0]
       .querySelectorAll('.cq-stage')].map(s => s.dataset.previewTheme));
@@ -280,6 +293,9 @@ def test_the_gallery_in_a_browser(tmp_path):
 
     assert out["errors"] == {"1440": [], "390": []}
     assert out["cards1440"] == 6 and out["themes"] == ["dark", "light", "checker"]
+    assert 2 <= out["columns1440"] <= 3
+    assert out["toggle"] == [["single", "false"], ["bulk", "false"], ["cutout", "true"]]
+    assert out["hiddenModes"] == [True, True]
     assert out["stageBg"][:2] == ["rgb(18, 18, 18)", "rgb(255, 255, 255)"]
     assert out["postsBeforeClick"] == 0                                   # opening the page replaces nothing
     assert out["filtered"] == "Pepsi Black Can 330ml"

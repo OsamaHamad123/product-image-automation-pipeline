@@ -246,9 +246,23 @@
             if (b) R.setFilter(b.getAttribute('data-bulk-filter'));
         });
         // الملف يحمل كل حل محفوظ مع حالته (اعتماد مراجع، اختيار آلي، أو مستبدل)، فاسمه يقول ذلك
-        d.bulkExport = el('a', { className: 'lq-btn lq-btn--ghost lq-btn--sm rv-bulk__export', href: S.urls.export,
+        // بقائمة «⋯» جنب الرقاقات (مش زر بالشريط): أداة مرة بالأسبوع، ما إلها مكان قبل أول بطاقة
+        d.bulkExport = el('a', { className: 'rv-menu__item rv-menu__item--link rv-bulk__export', role: 'menuitem', href: S.urls.export,
                                  title: 'ملف CSV بكل صورة انحفظت ورابطها وحالتها: معتمدة من مراجع، أو آلية، أو مستبدلة' },
                           [icon('upload', 16), el('span', { text: 'تصدير سجل الصور (CSV)' })]);
+        d.bulkExport.addEventListener('click', () => toggleMenu(false));
+        d.bulkMenu = el('div', { className: 'rv-menu rv-menu--down', id: 'rvBulkMenu', role: 'menu', hidden: true }, [d.bulkExport]);
+        d.bulkMenuBtn = el('button', { type: 'button', className: 'lq-btn lq-btn--secondary lq-btn--sm lq-btn--icon rv-bulk__menubtn', id: 'rvBulkMenuBtn',
+                                       'aria-haspopup': 'true', 'aria-expanded': 'false', 'aria-controls': 'rvBulkMenu',
+                                       'aria-label': 'المزيد', title: 'المزيد', text: '⋯' });
+        d.bulkMenuBtn.addEventListener('click', () => toggleMenu());
+        d.bulkMenu.addEventListener('keydown', onMenuKey);
+        document.addEventListener('click', e => {
+            if (!d.bulkMenu || d.bulkMenu.hidden) return;
+            const t = e.target;
+            if (t && t.closest && (t.closest('#rvBulkMenu') || t.closest('#rvBulkMenuBtn'))) return;
+            toggleMenu(false);
+        });
         d.bulkSearch = el('input', { type: 'search', className: 'lq-search__input', id: 'rvBulkSearch',
                                      placeholder: 'اسم، باركود، أو رقم صف', autocomplete: 'off', spellcheck: 'false' });
         let searchTimer = null;
@@ -266,14 +280,9 @@
                 el('span', { className: 'lq-sr-only', text: 'بحث بالبطاقات' }), d.bulkSearch]),
             el('label', { className: 'rv-brand' }, [el('span', { className: 'rv-brand__k', text: 'الماركة' }), d.bulkBrand]),
             d.bulkFilters,
-            d.bulkExport
+            el('span', { className: 'rv-more__wrap rv-bulk__menu' }, [d.bulkMenuBtn, d.bulkMenu])
         ]);
-        // سطر المفاتيح: بيختفي على شاشات اللمس (review.css @media (hover: none))
-        d.bulkKeys = el('p', { className: 'rv-bulk__keys rv-keyhint' }, [
-            R.kbd('← → ↑ ↓'), el('span', { text: ' للتنقل · ' }), R.kbd('مسافة'), el('span', { text: ' للتحديد (مع Shift لمجموعة) · ' }),
-            R.kbd('A'), el('span', { text: ' أو ' }), R.kbd('Enter'), el('span', { text: ' اعتماد · ' }), R.kbd('R'), el('span', { text: ' رفض · ' }),
-            R.kbd('Z'), el('span', { text: ' تكبير · ' }), R.kbd('?'), el('span', { text: ' كل الاختصارات' })
-        ]);
+        // المفاتيح: زر «?» جنب العنوان (R.keysButton) بيعرضها كلها، بدل سطر طويل فوق البطاقات
 
         d.bulkPickEligible = el('input', { type: 'checkbox', id: 'rvBulkEligible' });
         d.bulkPickEligible.addEventListener('change', () => {
@@ -304,10 +313,40 @@
         d.bulkGrid.addEventListener('focusin', onGridFocus);
         d.bulkMore = el('div', { className: 'rv-bulk__more' });
         d.bulkLane = el('div', { className: 'rv-bulk__lane', role: 'status', hidden: true });
-        box.appendChild(el('div', { className: 'rv-bulk__top' }, [d.bulkHead, d.bulkLane, d.bulkTools, d.bulkKeys]));
+        box.appendChild(el('div', { className: 'rv-bulk__top' }, [d.bulkHead, d.bulkLane, d.bulkTools]));
         box.appendChild(d.bulkBar);
         box.appendChild(d.bulkGrid);
         box.appendChild(d.bulkMore);
+    }
+
+    // قائمة «⋯» جنب الرقاقات (نفس rv-menu تبع شريط منتج واحد): بتنفتح لتحت، Esc أو نقرة برّا بتسكّرها والتركيز
+    // بيرجع للزر. بترجّع true إذا سكّرت شي (Esc بـ app.js onKeyDown)
+    function toggleMenu(open) {
+        const d = st().dom;
+        if (!d.bulkMenu) return false;
+        const want = open === undefined ? d.bulkMenu.hidden : !!open;
+        if (!want && d.bulkMenu.hidden) return false;
+        const inside = d.bulkMenu.contains(document.activeElement);
+        d.bulkMenu.hidden = !want;
+        d.bulkMenuBtn.setAttribute('aria-expanded', want ? 'true' : 'false');
+        if (want) {
+            const first = d.bulkMenu.querySelector('.rv-menu__item');
+            if (first && typeof first.focus === 'function') first.focus();
+        } else if (inside && typeof d.bulkMenuBtn.focus === 'function') {
+            d.bulkMenuBtn.focus();
+        }
+        return true;
+    }
+
+    // ↑ ↓ بين عناصر القائمة (وما بتحرّك البطاقات: preventDefault بيوقف onKeyDown العام)
+    function onMenuKey(e) {
+        if (!e || (e.key !== 'ArrowDown' && e.key !== 'ArrowUp')) return;
+        e.preventDefault();
+        const items = Array.from(st().dom.bulkMenu.querySelectorAll('.rv-menu__item'));
+        if (!items.length) return;
+        const at = items.indexOf(document.activeElement);
+        const next = items[(at + (e.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length];
+        if (next && typeof next.focus === 'function') next.focus();
     }
 
     // -------------------------------------------------------------------------------------------------
@@ -459,6 +498,33 @@
     // البطاقة اللي إلها tabindex 0 بالرسم الجاي (المركّزة، وإلا الأولى)
     let rovingKey = null;
 
+    // بطاقات فتح المراجع «تفاصيلها» (على اللمس): بتضل مفتوحة بعد إعادة الرسم
+    const details = new Set();
+
+    function detailsText(extra, open) {
+        if (open) return 'خبّي التفاصيل';
+        return extra ? `+${extra} تفاصيل` : 'تفاصيل';
+    }
+
+    // «+N تفاصيل» / «خبّي التفاصيل»: كل التحذيرات و«ليش هالصورة» بالبطاقة، بلا إعادة رسم (التركيز بيضل عالزر)
+    function toggleDetails(key) {
+        const d = st().dom;
+        const open = !details.has(key);
+        if (open) details.add(key);
+        else details.delete(key);
+        if (!d.bulkGrid) return open;
+        d.bulkGrid.querySelectorAll('.rv-card').forEach(node => {
+            if (node.getAttribute('data-key') !== key) return;
+            node.classList.toggle('is-details', open);
+            const btn = node.querySelector('[data-details]');
+            if (btn) {
+                btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+                btn.textContent = detailsText(parseInt(btn.getAttribute('data-extra'), 10) || 0, open);
+            }
+        });
+        return open;
+    }
+
     function card(it) {
         const S = st();
         const p = it.product;
@@ -474,6 +540,9 @@
         const warns = sel ? sel.warnings.map(w => R.warningText(w)) : [];
         // بطاقة «بلا اقتراح»: لماذا (catalog_match.explain) بجملة واحدة، والرمز في التلميح
         const why = sel ? null : R.noPickReason(it);
+        const explain = sel && R.explainList ? R.explainList(sel, true) : null;
+        const extra = Math.max(0, warns.length - 1);
+        const open = details.has(it.key);
         const focused = S.bulk.focus === it.key;
         const state = it.bucket;
         let overlay = null;
@@ -491,7 +560,8 @@
             overlay = el('span', { className: 'rv-card__overlay is-muted' }, [el('span', { text: 'رجعت للطابور' })]);
         }
         return el('article', {
-            className: 'rv-card' + (checked ? ' is-selected' : '') + (busyOrDone(it) ? ' is-done' : '') + (focused ? ' is-focused' : ''),
+            className: 'rv-card' + (checked ? ' is-selected' : '') + (busyOrDone(it) ? ' is-done' : '') + (focused ? ' is-focused' : '')
+                + (open ? ' is-details' : ''),
             dataset: { key: it.key, kind: kindOf(it) },
             // roving tabindex: Tab بيدخل الشبكة مرة وحدة (عالبطاقة المركّزة أو الأولى)، والأسهم بتتنقّل جوّاها
             tabindex: it.key === rovingKey ? '0' : '-1',
@@ -521,9 +591,13 @@
                 imageFailed(it) && sel ? el('span', { className: 'rv-card__warn' }, [icon('alert', 14, 2),
                     el('span', { text: 'ما قدرنا نعرض الصورة، فما بتنعتمد من هون: افتحه لتشوفه' })]) : null,
                 warns.length ? el('ul', { className: 'rv-card__warns' },
-                                  warns.map((w, i) => el('li', { className: 'rv-card__warn', title: sel.warnings[i] || null },
+                                  warns.map((w, i) => el('li', { className: 'rv-card__warn' + (i ? ' rv-card__warn--extra' : ''),
+                                                                 title: sel.warnings[i] || null },
                                                          [icon('alert', 14, 2), el('span', { text: w })]))) : null,
-                sel && R.explainList ? R.explainList(sel, true) : null,
+                explain,
+                // اللمس والموبايل (review.css): أول تحذير بس و«+N»، والباقي (مع «ليش هالصورة») ورا هالزر
+                extra || explain ? el('button', { type: 'button', className: 'rv-linkbtn rv-card__details', dataset: { details: it.key, extra: String(extra) },
+                                                  'aria-expanded': open ? 'true' : 'false', text: detailsText(extra, open) }) : null,
                 el('div', { className: 'rv-card__actions' }, [
                     el('button', { type: 'button', className: 'lq-btn lq-btn--soft lq-btn--sm rv-card__approve', dataset: { approve: it.key },
                                    disabled: !approvable(it), title: can && !seenNow(it) ? 'الصورة لسا ما ظهرت لك' : null,
@@ -1019,6 +1093,11 @@
             return;
         }
         const moved = focusFromEvent(t);
+        const more = t.closest('[data-details]');
+        if (more) {
+            toggleDetails(more.getAttribute('data-details'));
+            return;
+        }
         const reopen = t.closest('[data-reopen]');
         if (reopen) {
             const it = st().byKey.get(reopen.getAttribute('data-reopen'));
@@ -1254,7 +1333,7 @@
     R.bulk = {
         build, render, onFilter, approveSelected, approveOne, openRejectDialog, closeDialog, dialogOpen: () => !!dialog, dialogKey,
         visibleCards, shownCards, kindOf, laneOfCard, laneLine, laneView, progressView, seedSelection, rejectList, onKey,
-        refreshCards, openLightbox, tickRange, undoRejects,
+        refreshCards, openLightbox, tickRange, undoRejects, toggleMenu, toggleDetails,
         // مفاتيح المنتجات المحددة الآن (لصورها الحالية)
         tickedKeys: () => shownCards().filter(ticked).map(it => it.key)
     };

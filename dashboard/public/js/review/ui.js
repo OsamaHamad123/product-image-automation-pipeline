@@ -30,7 +30,8 @@
         minus: 'M6 12h12',
         play: 'M8 5v14l11-7z',
         review: 'M10 6h10M10 12h10M10 18h10M3.5 6l1.5 1.5L7.5 5M3.5 12l1.5 1.5 2.5-2.5M3.5 18l1.5 1.5 2.5-2.5',
-        'arrow-left': 'M19 12H5M11 6l-6 6 6 6'
+        'arrow-left': 'M19 12H5M11 6l-6 6 6 6',
+        'chevron-down': 'M6 9l6 6 6-6'
     };
 
     function icon(name, size, stroke, extraClass) {

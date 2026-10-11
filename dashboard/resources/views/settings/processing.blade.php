@@ -38,8 +38,9 @@
             @endforeach
         </select>
         {{ $fieldError('output_canvas_size') }}
-        <span class="lq-field__hint">لوحة مربعة، والمنتج كامل بيعبّي 88% منها بالنص. هاد أصغر مقاس: إذا الصورة الأصلية كبيرة ومفصّلة بتنتشر أكبر (لحد 2048 بكسل) لتبين حادة على شاشة الموبايل.</span>
+        <span class="lq-field__hint">لوحة مربعة والمنتج بالنص. هاد أصغر مقاس: الصورة الكبيرة بتنتشر أكبر لتبين حادة.</span>
     </label>
+    <details><summary class="lq-link">تفاصيل</summary><p class="lq-field__hint">المنتج كامل بيعبّي 88% من اللوحة. إذا الصورة الأصلية كبيرة ومفصّلة بتنتشر أكبر (لحد 2048 بكسل) لتبين حادة على شاشة الموبايل.</p></details>
 
     <label class="lq-field">
         <span class="lq-field__label">خلفية الصورة</span>
@@ -68,7 +69,8 @@
         <div class="lq-settings-switch-row" data-bg-fallback>
             <input type="hidden" name="bg_fallback_shown" value="1">
             <x-lq.switch name="bg_fallback" value="local" label="لما يخلص رصيد خدمة العزل: جرّب طريقة محلية مجانية" show-label :checked="$pr['fallback']['on']" :disabled="(bool) $dbError" />
-            <span class="lq-field__hint">إذا رصيد PhotoRoom أو remove.bg (أو مفتاحه أو حصته) خلص، الصورة بتنعزل على هالجهاز بدل ما يفشل الاعتماد: عزل محلي بموديل BiRefNet (لازم يكون منزّل)، وبتمر على نفس فحص القص. ممكن يكون أقل دقة من PhotoRoom، وإذا ما نجح بتضل الصورة بانتظار مراجعتك. ما بتنتشر صورة بدون عزل إلا إذا اخترت أنت «بدون عزل الخلفية»، وGrabCut ما بيشتغل تلقائياً أبداً.</span>
+            <span class="lq-field__hint">إذا خلص رصيد خدمة العزل، الصورة بتنعزل على هالجهاز بدل ما يفشل الاعتماد.</span>
+            <details><summary class="lq-link">تفاصيل</summary><p class="lq-field__hint">بيصير هيك إذا رصيد PhotoRoom أو remove.bg (أو مفتاحه أو حصته) خلص: عزل محلي بموديل BiRefNet (لازم يكون منزّل)، وبتمر على نفس فحص القص. ممكن يكون أقل دقة من PhotoRoom، وإذا ما نجح بتضل الصورة بانتظار مراجعتك. ما بتنتشر صورة بدون عزل إلا إذا اخترت أنت «بدون عزل الخلفية»، وGrabCut ما بيشتغل تلقائياً أبداً.</p></details>
         </div>
     @endif
 

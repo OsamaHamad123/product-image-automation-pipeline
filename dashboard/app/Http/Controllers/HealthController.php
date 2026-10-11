@@ -30,11 +30,11 @@ class HealthController extends Controller
 
     /** خدمات اللوحة بترتيب التصميم، وما تفعله كل خدمة (الملاحظة حين لا يوجد ما هو أدق). */
     public const SERVICES = [
-        'google_sheets' => ['name' => 'Google Sheet', 'note' => 'ملف المنتجات'],
+        'google_sheets' => ['name' => 'Google Sheet', 'note' => 'منه بنقرأ المنتجات وفيه بنكتب الروابط'],
         'serper' => ['name' => 'Serper', 'note' => 'المصدر الأساسي للصور'],
-        'gemini' => ['name' => 'Gemini', 'note' => 'قراءة الملصق'],
-        'photoroom' => ['name' => 'PhotoRoom', 'note' => 'عزل الخلفية'],
-        'cloudinary' => ['name' => 'Cloudinary', 'note' => 'رفع الصور النهائية'],
+        'gemini' => ['name' => 'Gemini', 'note' => 'بيتأكد إن الصورة للمنتج الصح'],
+        'photoroom' => ['name' => 'PhotoRoom', 'note' => 'بيحط المنتج على خلفية نظيفة'],
+        'cloudinary' => ['name' => 'Cloudinary', 'note' => 'وين بتنحفظ الصور النهائية'],
     ];
 
     /** خدمات اختيارية: تظهر في سطر واحد تحت البطاقات فقط إذا كانت مضبوطة. */

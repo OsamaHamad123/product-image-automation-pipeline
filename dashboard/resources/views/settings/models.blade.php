@@ -13,7 +13,8 @@
     <input type="hidden" name="section" value="models">
     <div class="lq-settings-card__head">
         <h2 class="lq-section-title" id="lq-settings-models-title">نماذج التحقق</h2>
-        <p class="lq-settings-card__intro">النموذج الأساسي بيقرأ ملصق كل صورة مرشحة. إذا ما كان متأكد من الصورة الأقرب، النموذج القوي بياخد عليها نظرة تانية بدقة أعلى، مرة وحدة بالكتير لكل منتج وضمن ميزانية شهرية. القرار دايماً بقواعد النظام: النظرة التانية ما بتقدر تقلب صورة مرفوضة لمقبولة.</p>
+        <p class="lq-settings-card__intro">النموذج الأساسي بيقرأ ملصق كل صورة مرشحة، والقوي بياخد نظرة تانية بس لما الأساسي مش متأكد.</p>
+        <details><summary class="lq-link">تفاصيل</summary><p class="lq-field__hint">النظرة التانية بدقة أعلى، مرة وحدة بالكتير لكل منتج وضمن ميزانية شهرية. القرار دايماً بقواعد النظام: النظرة التانية ما بتقدر تقلب صورة مرفوضة لمقبولة.</p></details>
     </div>
 
     @foreach ($md['warnings'] as $warning)
@@ -69,9 +70,12 @@
         @if ($md['normalizer_on'] && !$md['normalizer_key_saved'])
             <span class="lq-field__error" id="lq-models-normalizer-help">بتحتاج مفتاح Gemini وهو مش محفوظ: ضيفه من «المفاتيح». لحد ما تضيفه، البحث بيكمل بكلمات الشيت بس.</span>
         @else
-            <span class="lq-field__hint" id="lq-models-normalizer-help">بتفك اختصارات أسماء الشيت (مثلاً LGT بتصير Light) لتكتب كلمات بحث أوضح، مرة وحدة لكل منتج وبتنحفظ. ما بتقرر شي: الصورة بتنقبل بس إذا طابقت اسم الشيت نفسه. وإذا ما لقينا الماركة وجربنا الماركة اللي خمّنتها، الصورة اللي بتطلع بتستنى مراجعتك دايماً.</span>
+            <span class="lq-field__hint" id="lq-models-normalizer-help">بتفك اختصارات أسماء الشيت (مثلاً LGT بتصير Light) لبحث أوضح، وما بتقرر شي لحالها.</span>
         @endif
     </label>
+    @unless ($md['normalizer_on'] && !$md['normalizer_key_saved'])
+        <details><summary class="lq-link">تفاصيل</summary><p class="lq-field__hint">مرة وحدة لكل منتج وبتنحفظ. الصورة بتنقبل بس إذا طابقت اسم الشيت نفسه. وإذا ما لقينا الماركة وجربنا الماركة اللي خمّنتها، الصورة اللي بتطلع بتستنى مراجعتك دايماً.</p></details>
+    @endunless
 
     <label class="lq-field">
         <span class="lq-field__label">الميزانية الشهرية للنموذج القوي (دولار)</span>
@@ -94,7 +98,8 @@
 
     <fieldset class="lq-settings-fieldset lq-settings-fieldset--boxed" @disabled((bool) $dbError)>
         <legend class="lq-field__label">الأسعار (دولار لكل مليون token)</legend>
-        <span class="lq-field__hint" id="lq-models-prices-help">أسعار تقديرية بتنحسب فيها التكلفة والميزانية. عدّلها إذا تغيّرت أسعار خطتك. «لكل 100 منتج» تقدير: الأساسي قراءة وحدة لكل منتج، والقوي نظرة تانية لكل منتج (حد أعلى، لأنه ما بيشتغل إلا لما الأساسي مش متأكد).</span>
+        <span class="lq-field__hint" id="lq-models-prices-help">أسعار تقديرية بتنحسب فيها التكلفة والميزانية؛ عدّلها إذا تغيّرت أسعار خطتك.</span>
+        <details><summary class="lq-link">تفاصيل</summary><p class="lq-field__hint">«لكل 100 منتج» تقدير: الأساسي قراءة وحدة لكل منتج، والقوي نظرة تانية لكل منتج (حد أعلى، لأنه ما بيشتغل إلا لما الأساسي مش متأكد).</p></details>
         <div class="lq-table-wrap lq-models__table">
             <table class="lq-table">
                 <thead>

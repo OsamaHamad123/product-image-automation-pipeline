@@ -28,7 +28,7 @@
         </div>
         <div class="lq-page-header__actions lq-home__actions">
             <x-lq.button variant="secondary" icon="play" href="{{ route('dashboard.batch_automation') }}" data-lq-admin>تشغيل جديد</x-lq.button>
-            <a class="lq-btn lq-btn--primary" href="{{ route('dashboard.catalog') }}?mode=bulk" data-home="review-link">افتح قائمة المراجعة<span class="lq-btn__count lq-num" data-home="review-count">{{ $homeWaiting ?? '—' }}</span></a>
+            <a class="lq-btn lq-btn--secondary" href="{{ route('dashboard.catalog') }}?mode=bulk" data-home="review-link">افتح قائمة المراجعة<span class="lq-btn__count lq-num" data-home="review-count">{{ $homeWaiting ?? '—' }}</span></a>
         </div>
     </header>
 
@@ -41,7 +41,7 @@
     <div class="lq-alert lq-alert--info lq-home-next" data-home="next" role="status" hidden>
         <x-lq.icon name="arrow-left" :size="20" class="lq-alert__icon" />
         <div class="lq-alert__body"><strong class="lq-alert__title" data-home="next-title"></strong> <span data-home="next-text"></span></div>
-        <a class="lq-btn lq-btn--primary lq-btn--sm lq-home-next__go" data-home="next-action" href="{{ route('dashboard.catalog') }}"></a>
+        <a class="lq-btn {{ ($setupCard ?? null) ? 'lq-btn--secondary' : 'lq-btn--primary' }} lq-btn--sm lq-home-next__go" data-home="next-action" href="{{ route('dashboard.catalog') }}"></a>
     </div>
 
     <div class="lq-alert lq-alert--danger lq-alert--banner" role="alert" data-home="alert" hidden>

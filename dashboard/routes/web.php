@@ -117,7 +117,7 @@ Route::post('/api/run/barcode-write', [RunController::class, 'barcodeWrite']);
 Route::post('/api/system/reprocess/plan', [\App\Http\Controllers\RecutController::class, 'plan']);
 Route::post('/api/system/reprocess/start', [\App\Http\Controllers\RecutController::class, 'start']);
 Route::get('/api/system/reprocess', [\App\Http\Controllers\RecutController::class, 'batchStatus']);
-Route::get('/cutout-check', [\App\Http\Controllers\RecutController::class, 'page'])->name('dashboard.cutout_check');
+Route::get('/cutout-check', [\App\Http\Controllers\RecutController::class, 'page'])->name('dashboard.cutout_check'); // ← /catalog?mode=cutout
 Route::get('/api/cutout/gallery', [\App\Http\Controllers\RecutController::class, 'gallery']);
 Route::post('/api/cutout/try', [\App\Http\Controllers\RecutController::class, 'tryCut']);
 Route::post('/api/cutout/apply', [\App\Http\Controllers\RecutController::class, 'apply']);

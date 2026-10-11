@@ -9,7 +9,7 @@
 <section class="lq-card lq-home-setup" aria-labelledby="lq-home-setup-title" data-home-setup>
     <div class="lq-home-setup__text">
         <h2 class="lq-card__title" id="lq-home-setup-title">جهّز لقطة</h2>
-        <p class="lq-home-setup__lead">{{ $setupCard['ok'] }} من {{ $setupCard['total'] }} خطوات تمام. الخطوة الجاية: «{{ $setupCard['next'] }}». التقدّم محفوظ، كمّل من وين ما وقفت.</p>
+        <p class="lq-home-setup__lead">{{ $setupCard['ok'] }} من {{ $setupCard['total'] }} خطوات تمام. الخطوة الجاية: «{{ $setupCard['next'] }}».</p>
         <ol class="lq-home-setup__steps" aria-label="خطوات التجهيز">
             @foreach ($setupCard['steps'] as $setupStep)
                 <li class="lq-home-setup__step" data-status="{{ $setupStep['status'] }}"><span class="lq-dot {{ $setupCardDots[$setupStep['tone']] ?? 'lq-dot--muted' }}" aria-hidden="true"></span>{{ $setupStep['title'] }}<span class="lq-sr-only">: {{ $setupStep['label'] }}</span></li>

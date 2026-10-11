@@ -52,6 +52,30 @@
     $kitIcons = ['home', 'review', 'run', 'health', 'settings', 'user', 'search', 'check', 'x', 'alert', 'external',
         'refresh', 'play', 'pause', 'stop', 'grid', 'upload', 'link', 'shield', 'barcode', 'sparkle',
         'store', 'weight', 'text', 'image', 'info', 'exclamation', 'minus', 'trash', 'arrow-left'];
+    $kitTypeScale = [
+        ['2xs', '--lq-fs-2xs', '12', 'تلميح، مفتاح، عدّاد صغير'],
+        ['xs', '--lq-fs-xs', '13', 'نص ثانوي، شارة، سطر تفاصيل، جدول'],
+        ['sm', '--lq-fs-sm', '14', 'زر، حقل، وصف الصفحة'],
+        ['md', '--lq-fs-md', '15', 'النص العادي'],
+        ['lg', '--lq-fs-lg', '16', 'عنوان بطاقة'],
+        ['xl', '--lq-fs-xl', '20', 'عنوان قسم، عنوان سؤال'],
+        ['2xl', '--lq-fs-2xl', '26', 'عنوان الصفحة'],
+        ['3xl', '--lq-fs-3xl', '30', 'رقم كبير بالتشغيل'],
+        ['kpi', '--lq-fs-kpi', '34', 'رقم بطاقة المؤشر'],
+    ];
+    $kitLineHeights = [['none', '--lq-lh-none', '1'], ['tight', '--lq-lh-tight', '1.2'], ['snug', '--lq-lh-snug', '1.4'],
+        ['normal', '--lq-lh-normal', '1.5'], ['base', '--lq-lh-base', '1.6'], ['relaxed', '--lq-lh-relaxed', '1.7'],
+        ['loose', '--lq-lh-loose', '1.8']];
+    $kitSpaces = [['--lq-space-1', '4'], ['--lq-space-2', '8'], ['--lq-space-3', '12'], ['--lq-space-4', '16'],
+        ['--lq-space-5', '20'], ['--lq-space-6', '24'], ['--lq-space-8', '32'], ['--lq-space-10', '40']];
+    $kitTones = [
+        ['success', 'نجاح', 'متصل'],
+        ['warning', 'تحذير', 'بطيء'],
+        ['danger', 'خطر', 'متوقف'],
+        ['info', 'معلومة', 'قيد الفحص'],
+        ['neutral', 'محايد', 'ما انفحص'],
+        ['teal', 'الأساسي', 'معتمد'],
+    ];
     $kitBrands = [
         ['AL ALALI', '12', '100%', '76%', 'تحتاج 177 مراجعة', 'none'],
         ['MCCAIN', '6', '100%', '61%', 'تحتاج 183 مراجعة', 'none'],
@@ -62,39 +86,73 @@
 
 @push('styles')
 <style>
-    .kit-toc { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: 13px; }
-    .kit-sub { margin: 0; font-size: 13px; font-weight: 600; color: var(--lq-text-2); }
-    .kit-note { margin: 0; font-size: 12.5px; color: var(--lq-text-3); line-height: 1.7; }
+    .kit-toc { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: var(--lq-fs-xs); }
+    .kit-sub { margin: 0; font-size: var(--lq-fs-xs); font-weight: 600; color: var(--lq-text-2); }
+    .kit-note { margin: 0; font-size: var(--lq-fs-2xs); color: var(--lq-text-3); line-height: var(--lq-lh-relaxed); }
+    .kit-body { font-size: var(--lq-fs-xs); line-height: var(--lq-lh-relaxed); }
+    .kit-small { font-size: var(--lq-fs-xs); }
+    .kit-caption { font-size: var(--lq-fs-2xs); }
+    .kit-row-wide { gap: var(--lq-space-3) var(--lq-space-6); }
+    .kit-tiles { gap: var(--lq-space-2); }
+    .kit-input-end { text-align: end; }   /* a left-to-right value sits on the page's start side */
     .kit-brand { gap: 28px; padding: 36px 32px; border-radius: 24px; }
     .kit-brand__row { display: flex; align-items: center; gap: 20px; }
     .kit-brand__words { display: flex; flex-direction: column; gap: 6px; }
-    .kit-brand__name { font-family: var(--lq-font-display); font-weight: 700; font-size: 52px; line-height: 1; color: #FFFFFF; }
-    .kit-brand__latin { font-size: 15px; color: var(--lq-ink-muted); letter-spacing: 0.04em; }
-    .kit-brand__slogan { font-family: var(--lq-font-display); font-weight: 500; font-size: 22px; line-height: 1.5; color: #FFFFFF; }
-    .kit-brand__facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; font-size: 13px; line-height: 1.7; color: var(--lq-ink-text); }
-    .kit-brand__facts strong { color: #FFFFFF; font-weight: 600; }
+    /* the logo lock-up is the one size off the scale: it shows the mark, not a page */
+    .kit-brand__name { font-family: var(--lq-font-display); font-weight: 700; font-size: 52px; line-height: var(--lq-lh-none); color: var(--lq-text-on-dark); }
+    .kit-brand__latin { font-size: var(--lq-fs-md); color: var(--lq-ink-muted); letter-spacing: 0.04em; }
+    .kit-brand__slogan { font-family: var(--lq-font-display); font-weight: 500; font-size: var(--lq-fs-xl); line-height: var(--lq-lh-normal); color: var(--lq-text-on-dark); }
+    .kit-brand__facts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; font-size: var(--lq-fs-xs); line-height: var(--lq-lh-relaxed); color: var(--lq-ink-text); }
+    .kit-brand__facts strong { color: var(--lq-text-on-dark); font-weight: 600; }
     .kit-principle { display: flex; align-items: flex-start; gap: 14px; }
-    .kit-principle__n { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; flex-shrink: 0; border-radius: 8px; background: var(--lq-teal-soft); color: var(--lq-teal-700); font-size: 14px; font-weight: 700; }
+    .kit-principle__n { display: inline-flex; align-items: center; justify-content: center; width: 30px; height: 30px; flex-shrink: 0; border-radius: var(--lq-radius-sm); background: var(--lq-accent-soft); color: var(--lq-accent); font-size: var(--lq-fs-sm); font-weight: 700; }
     .kit-principle__text { display: flex; flex-direction: column; gap: 3px; }
-    .kit-principle__title { font-size: 14.5px; font-weight: 600; }
-    .kit-principle__desc { font-size: 13px; color: var(--lq-text-2); line-height: 1.65; }
+    .kit-principle__title { font-size: var(--lq-fs-sm); font-weight: 600; }
+    .kit-principle__desc { font-size: var(--lq-fs-xs); color: var(--lq-text-2); line-height: var(--lq-lh-base); }
     .kit-swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 12px; }
     .kit-swatch { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
-    .kit-swatch__chip { height: 52px; margin-bottom: 3px; border: 1px solid rgba(14, 28, 36, 0.08); border-radius: 10px; }
-    .kit-swatch__name { font-size: 12px; font-weight: 500; }
+    .kit-swatch__chip { height: 52px; margin-bottom: 3px; border: 1px solid var(--lq-swatch-edge); border-radius: var(--lq-radius-md); }
+    .kit-swatch__name { font-size: var(--lq-fs-2xs); font-weight: 500; }
     .kit-swatch__hex,
-    .kit-swatch__token { overflow: hidden; font-size: 11.5px; color: var(--lq-text-3); direction: ltr; text-align: right; white-space: nowrap; text-overflow: ellipsis; }
+    .kit-swatch__token { overflow: hidden; font-size: var(--lq-fs-2xs); color: var(--lq-text-3); direction: ltr; text-align: end; white-space: nowrap; text-overflow: ellipsis; }
     .kit-radii { display: flex; flex-wrap: wrap; gap: 16px 20px; }
     .kit-radius { display: flex; flex-direction: column; align-items: center; gap: 8px; }
-    .kit-radius__box { width: 64px; height: 48px; border: 1.5px solid var(--lq-teal-700); background: var(--lq-teal-soft); }
+    .kit-radius__box { width: 64px; height: 48px; border: 1.5px solid var(--lq-accent); background: var(--lq-accent-soft); }
+    .kit-spaces { display: flex; flex-direction: column; gap: var(--lq-space-2); }
+    .kit-space { display: grid; grid-template-columns: 10em minmax(0, 1fr); align-items: center; gap: var(--lq-space-3); }
+    .kit-space__bar { display: block; height: 12px; border-radius: var(--lq-radius-pill); background: var(--lq-accent); }
+    .kit-type-list { display: flex; flex-direction: column; margin: 0; padding: 0; list-style: none; }
+    .kit-type-item { display: grid; grid-template-columns: 10em minmax(0, 1fr); align-items: baseline; gap: var(--lq-space-2) var(--lq-space-4); padding-block: var(--lq-space-2); border-block-start: 1px solid var(--lq-border-soft); }
+    .kit-type-item:first-child { border-block-start: 0; }
+    .kit-type-item__token { font-size: var(--lq-fs-2xs); color: var(--lq-text-3); direction: ltr; text-align: end; }
+    .kit-type-item__sample { min-width: 0; line-height: var(--lq-lh-snug); overflow-wrap: anywhere; }
+    .kit-fs--2xs { font-size: var(--lq-fs-2xs); }
+    .kit-fs--xs { font-size: var(--lq-fs-xs); }
+    .kit-fs--sm { font-size: var(--lq-fs-sm); }
+    .kit-fs--md { font-size: var(--lq-fs-md); }
+    .kit-fs--lg { font-size: var(--lq-fs-lg); font-weight: 600; }
+    .kit-fs--xl { font-size: var(--lq-fs-xl); font-weight: 600; }
+    .kit-fs--2xl { font-family: var(--lq-font-display); font-size: var(--lq-fs-2xl); font-weight: 600; }
+    .kit-fs--3xl { font-size: var(--lq-fs-3xl); font-weight: 600; }
+    .kit-fs--kpi { font-size: var(--lq-fs-kpi); font-weight: 600; }
+    .kit-lh { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: var(--lq-space-3); }
+    .kit-lh__sample { max-width: 14em; margin: 0; padding: var(--lq-space-2); border-radius: var(--lq-radius-sm); background: var(--lq-accent-soft); font-size: var(--lq-fs-xs); }
+    .kit-lh__sample--none { line-height: var(--lq-lh-none); }
+    .kit-lh__sample--tight { line-height: var(--lq-lh-tight); }
+    .kit-lh__sample--snug { line-height: var(--lq-lh-snug); }
+    .kit-lh__sample--normal { line-height: var(--lq-lh-normal); }
+    .kit-lh__sample--base { line-height: var(--lq-lh-base); }
+    .kit-lh__sample--relaxed { line-height: var(--lq-lh-relaxed); }
+    .kit-lh__sample--loose { line-height: var(--lq-lh-loose); }
+    .kit-dialog-stage { display: flex; justify-content: center; padding: var(--lq-space-8) var(--lq-space-4); border-radius: var(--lq-radius-xl); background: var(--lq-scrim); }
+    .kit-dialog-stage .lq-dialog { max-height: none; }
     .kit-type-row { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; padding-bottom: 12px; border-bottom: 1px solid var(--lq-border-soft); }
-    .kit-type-display { font-family: var(--lq-font-display); font-weight: 600; font-size: 30px; }
-    .kit-type-scale { display: flex; flex-wrap: wrap; gap: 8px 18px; font-size: 12.5px; color: var(--lq-text-2); }
-    .kit-dark { display: grid; grid-template-columns: repeat(auto-fill, minmax(208px, 1fr)); gap: 14px; padding: 20px; border-radius: 16px; background: var(--lq-ink-900); }
+    .kit-type-display { font-family: var(--lq-font-display); font-weight: 600; font-size: var(--lq-fs-3xl); }
+    .kit-dark { display: grid; grid-template-columns: repeat(auto-fill, minmax(208px, 1fr)); gap: 14px; padding: 20px; border-radius: var(--lq-radius-xl); background: var(--lq-ink-900); }
     .kit-icons { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 10px; }
-    .kit-icon { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 14px 8px 10px; border: 1px solid var(--lq-border); border-radius: 12px; color: var(--lq-text); }
-    .kit-icon__name { font-size: 11.5px; color: var(--lq-text-3); direction: ltr; }
-    .kit-actionbar { position: static; border: 1px solid var(--lq-border); border-radius: 12px; padding: 14px 16px; }
+    .kit-icon { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 14px 8px 10px; border: 1px solid var(--lq-border); border-radius: var(--lq-radius-lg); color: var(--lq-text); }
+    .kit-icon__name { font-size: var(--lq-fs-2xs); color: var(--lq-text-3); direction: ltr; }
+    .kit-actionbar { position: static; border: 1px solid var(--lq-border); border-radius: var(--lq-radius-lg); padding: 14px 16px; }
     .kit-toast-stack { display: flex; flex-direction: column; align-items: flex-start; gap: 10px; }
     .kit-skeleton-row { display: flex; align-items: center; gap: 12px; }
     .kit-skeleton-lines { display: flex; flex-direction: column; flex-grow: 1; gap: 8px; }
@@ -103,6 +161,9 @@
         .kit-brand { padding: 28px 22px; }
         .kit-brand__name { font-size: 40px; }
         .kit-brand__facts { grid-template-columns: minmax(0, 1fr); }
+        .kit-type-item,
+        .kit-space { grid-template-columns: minmax(0, 1fr); }
+        .kit-type-item__token { text-align: start; }
     }
 </style>
 @endpush
@@ -119,8 +180,13 @@
     <nav class="kit-toc" aria-label="أقسام الصفحة">
         <a class="lq-link" href="#kit-identity">الهوية</a>
         <a class="lq-link" href="#kit-colors">الألوان والخطوط</a>
+        <a class="lq-link" href="#kit-type">مقاسات الخط</a>
+        <a class="lq-link" href="#kit-spacing">المسافات والزوايا</a>
         <a class="lq-link" href="#kit-buttons">الأزرار</a>
         <a class="lq-link" href="#kit-status">الحالات</a>
+        <a class="lq-link" href="#kit-tones">الألوان حسب المعنى</a>
+        <a class="lq-link" href="#kit-cards">البطاقات</a>
+        <a class="lq-link" href="#kit-dialog">السؤال قبل التنفيذ</a>
         <a class="lq-link" href="#kit-alerts">التنبيهات</a>
         <a class="lq-link" href="#kit-numbers">الأرقام</a>
         <a class="lq-link" href="#kit-progress">التقدّم</a>
@@ -192,13 +258,19 @@
                 <span>الصورة مطابقة للماركة والحجم. <strong>1,280 منتج · 98.4%</strong></span>
                 <span class="lq-subtle">Readex Pro · الواجهة والأرقام</span>
             </div>
-            <div class="kit-type-scale">
-                <span>عنوان الصفحة 26</span><span>عنوان بطاقة 16</span><span>نص 14</span><span>صغير 12.5</span><span>رقم كبير 34</span>
-            </div>
+            <p class="kit-note">كل مقاس خط من سلّم واحد (<a class="lq-link" href="#kit-type">مقاسات الخط</a>): عنوان الصفحة، ثم عنوان القسم، ثم عنوان البطاقة، وما في صفحة بتغيّرهم.</p>
         </x-lq.card>
 
-        <x-lq.card title="المسافات والزوايا">
-            <p class="kit-note">شبكة 8 نقاط (4، 8، 12، 16، 20، 24، 32، 40) وزوايا 8 / 10 / 12 / 16. البطاقات بحدود رفيعة وظل خفيف جداً.</p>
+        <x-lq.card title="المسافات والزوايا" id="kit-spacing">
+            <p class="kit-note">شبكة 8 نقاط (4، 8، 12، 16، 20، 24، 32، 40) وزوايا 8 / 10 / 12 / 16. البطاقات بحدود رفيعة وظل خفيف جداً، وكلها بنفس الحشوة (20، و16 عالموبايل).</p>
+            <div class="kit-spaces">
+                @foreach ($kitSpaces as $kitSpace)
+                    <div class="kit-space">
+                        <span class="kit-swatch__token" title="{{ $kitSpace[0] }}">{{ $kitSpace[0] }} · {{ $kitSpace[1] }}</span>
+                        <span class="kit-space__bar" style="inline-size: var({{ $kitSpace[0] }})"></span>
+                    </div>
+                @endforeach
+            </div>
             <div class="kit-radii">
                 @foreach ([['--lq-radius-sm', '8'], ['--lq-radius-md', '10'], ['--lq-radius-lg', '12'], ['--lq-radius-xl', '16'], ['--lq-radius-pill', '999']] as $kitRadius)
                     <div class="kit-radius">
@@ -209,6 +281,34 @@
             </div>
         </x-lq.card>
     </div>
+
+    {{-- Type scale --}}
+    <x-lq.card title="مقاسات الخط" meta="سلّم واحد لكل الصفحات" id="kit-type">
+        <ul class="kit-type-list">
+            @foreach ($kitTypeScale as $kitType)
+                <li class="kit-type-item">
+                    <span class="kit-type-item__token">{{ $kitType[1] }} · {{ $kitType[2] }}px</span>
+                    <span class="kit-type-item__sample kit-fs--{{ $kitType[0] }}">{{ $kitType[3] }}</span>
+                </li>
+            @endforeach
+        </ul>
+        <h3 class="kit-sub">ارتفاع السطر</h3>
+        <div class="kit-lh">
+            @foreach ($kitLineHeights as $kitLh)
+                <div class="lq-stack lq-stack--sm">
+                    <span class="kit-swatch__token">{{ $kitLh[1] }} · {{ $kitLh[2] }}</span>
+                    <p class="kit-lh__sample kit-lh__sample--{{ $kitLh[0] }}">الصورة مطابقة للماركة والحجم، والشيت ما حدد النوع.</p>
+                </div>
+            @endforeach
+        </div>
+        <h3 class="kit-sub">العناوين</h3>
+        <div class="lq-stack lq-stack--sm">
+            <span class="lq-page-title">عنوان الصفحة</span>
+            <span class="lq-section-title">عنوان القسم</span>
+            <span class="lq-card__title">عنوان البطاقة</span>
+            <p class="lq-card__lead">سطر الشرح تحت العنوان: ما بيطول أكتر من 68 حرف تقريباً حتى يضل مريح للقراءة، مهما عرضت الشاشة.</p>
+        </div>
+    </x-lq.card>
 
     {{-- Buttons --}}
     <x-lq.card title="الأزرار" meta="أساسي، ثانوي، خطر، ناعم، شفاف · ثلاثة أحجام" id="kit-buttons">
@@ -294,12 +394,68 @@
         </div>
 
         <h3 class="kit-sub">حالة الخدمات</h3>
-        <div class="lq-row" style="gap: 10px 22px">
+        <div class="lq-row kit-row-wide">
             <span class="lq-status"><span class="lq-dot lq-dot--success" aria-hidden="true"></span>Google Sheet <span class="lq-status__note">متصل</span></span>
             <span class="lq-status"><span class="lq-dot lq-dot--success" aria-hidden="true"></span>Serper <span class="lq-status__note">يعمل</span></span>
             <span class="lq-status"><span class="lq-dot lq-dot--success" aria-hidden="true"></span>Gemini <span class="lq-status__note">يعمل</span></span>
             <span class="lq-status"><span class="lq-dot lq-dot--warning" aria-hidden="true"></span>PhotoRoom <span class="lq-status__note">بطيء</span></span>
             <span class="lq-status"><span class="lq-dot lq-dot--danger" aria-hidden="true"></span>Cloudinary <span class="lq-status__note">متوقف</span></span>
+        </div>
+    </x-lq.card>
+
+    {{-- Tones --}}
+    <x-lq.card title="الألوان حسب المعنى" meta="شارة ونص بنفس اللون لنفس المعنى بكل الصفحات" id="kit-tones">
+        <h3 class="kit-sub">شارات حسب المعنى (lq-chip--success، warning، danger، info، neutral، teal)</h3>
+        <div class="lq-row lq-row--sm">
+            @foreach ($kitTones as $kitTone)
+                <x-lq.chip :tone="$kitTone[0]">{{ $kitTone[2] }}</x-lq.chip>
+            @endforeach
+        </div>
+        <div class="lq-row lq-row--sm">
+            @foreach ($kitTones as $kitTone)
+                <x-lq.chip :tone="$kitTone[0]" size="sm" :dot="false">{{ $kitTone[1] }}</x-lq.chip>
+            @endforeach
+        </div>
+        <h3 class="kit-sub">نص حسب المعنى (lq-text--success، warning، danger، info، muted)</h3>
+        <div class="lq-row kit-row-wide">
+            <span class="lq-text--success">انحفظ</span>
+            <span class="lq-text--warning">بدها انتباه</span>
+            <span class="lq-text--danger">ما انحفظ</span>
+            <span class="lq-text--info">قيد الفحص</span>
+            <span class="lq-text--muted">ما في شي جديد</span>
+        </div>
+        <p class="kit-note">أسماء حالات المنتج (proposed، none، not-found، approved، error) لسا شغالة وبتعطي نفس الألوان.</p>
+    </x-lq.card>
+
+    {{-- Cards --}}
+    <div class="lq-grid lq-grid--2" id="kit-cards">
+        <x-lq.card title="بطاقة عمل (مرفوعة)" meta="lq-card">
+            <p class="lq-card__lead">للكتل اللي فيها شي تعمله: زر، نموذج، قرار. بيضا بظل خفيف.</p>
+            <div class="lq-row">
+                <x-lq.button size="sm" icon="play">ابدأ</x-lq.button>
+                <x-lq.button variant="secondary" size="sm">لاحقاً</x-lq.button>
+            </div>
+        </x-lq.card>
+        <x-lq.card variant="flat" title="بطاقة مرجع (مسطّحة)" meta="lq-card--flat">
+            <p class="lq-card__lead">للكتل اللي بتقرأها بس: شرح، ملخص، معلومة. بلا ظل وعلى سطح هادي، حتى تبيّن بطاقات العمل أوضح.</p>
+        </x-lq.card>
+    </div>
+
+    {{-- Laqta.ask --}}
+    <x-lq.card title="السؤال قبل التنفيذ" meta="Laqta.ask بدل window.confirm" id="kit-dialog">
+        <div class="kit-dialog-stage" aria-hidden="true">
+            <div class="lq-dialog">
+                <span class="lq-dialog__title">نحذف 3 صور مرفوضة؟</span>
+                <p class="lq-dialog__text">رح تنحذف من السجل ولا يمكن استرجاعها.</p>
+                <div class="lq-dialog__actions">
+                    <span class="lq-btn lq-btn--danger-solid">أكيد</span>
+                    <span class="lq-btn lq-btn--secondary">لا، رجوع</span>
+                </div>
+            </div>
+        </div>
+        <div class="lq-row">
+            <x-lq.button variant="secondary" size="sm" data-kit-ask>جرّب السؤال</x-lq.button>
+            <span class="kit-note" data-kit-ask-out aria-live="polite"></span>
         </div>
     </x-lq.card>
 
@@ -333,19 +489,19 @@
 
         <div class="lq-grid lq-grid--2">
             <x-lq.card title="آخر تشغيل" meta="اليوم 09:40 · الصفوف 2–61 · 21 دقيقة · 0.19 دولار">
-                <div class="lq-grid lq-grid--4" style="gap: 10px">
+                <div class="lq-grid lq-grid--4 kit-tiles">
                     <x-lq.stat tone="success" value="32" label="مقترحة" />
                     <x-lq.stat tone="muted" value="17" label="بلا اقتراح" />
                     <x-lq.stat tone="info" value="3" label="ما انلقت" />
                     <x-lq.stat tone="danger" value="8" label="أعطال مؤقتة" />
                 </div>
-                <p class="lq-muted" style="font-size: 13px; line-height: 1.7">الأعطال المؤقتة الثمانية (الصفوف 46–53) سببها انقطاع الإنترنت. رجعت للطابور وبتنعاد لحالها بالتشغيل الجاي.</p>
+                <p class="lq-muted kit-body">الأعطال المؤقتة الثمانية (الصفوف 46–53) سببها انقطاع الإنترنت. رجعت للطابور وبتنعاد لحالها بالتشغيل الجاي.</p>
             </x-lq.card>
 
             <x-lq.card title="التكلفة التقديرية">
                 <x-slot:actions><a class="lq-link" href="{{ route('dashboard.settings') }}">الأسعار</a></x-slot:actions>
                 <span class="lq-kpi__value lq-ltr">$0.19</span>
-                <div class="lq-stack lq-stack--sm lq-muted" style="font-size: 13px">
+                <div class="lq-stack lq-stack--sm lq-muted kit-small">
                     <div class="lq-row lq-row--between"><span>Serper · 118 استعلام</span><span class="lq-num lq-ltr">$0.12</span></div>
                     <div class="lq-row lq-row--between"><span>Gemini · 70 فحص</span><span class="lq-num lq-ltr">$0.07</span></div>
                 </div>
@@ -390,7 +546,7 @@
         <x-lq.card title="الحقول">
             <label class="lq-field">
                 <span class="lq-field__label">الصفوف</span>
-                <input class="lq-input" type="text" value="62-101" dir="ltr" style="text-align: right" inputmode="numeric">
+                <input class="lq-input kit-input-end" type="text" value="62-101" dir="ltr" inputmode="numeric">
                 <span class="lq-field__hint">مثلاً 62-101 أو 5، 9، 14</span>
             </label>
             <label class="lq-field">
@@ -428,7 +584,7 @@
             <label class="lq-check"><input type="checkbox" disabled> <span>خيار غير متاح الآن</span></label>
 
             <h3 class="kit-sub">مفتاح التشغيل</h3>
-            <div class="lq-row" style="gap: 12px 28px">
+            <div class="lq-row kit-row-wide">
                 <x-lq.switch label="تفعيل النشر الآلي" />
                 <x-lq.switch label="عزل الخلفية" checked />
                 <x-lq.switch label="الرجوع للنظام القديم" disabled />
@@ -477,7 +633,7 @@
     {{-- Sheet vs image --}}
     <div class="lq-grid lq-grid--2" id="kit-checks">
         <x-lq.card title="الشيت مقابل الصورة" padding="compact">
-            <x-slot:actions><span class="lq-row lq-row--sm lq-muted" style="font-size: 12px"><x-lq.icon name="sparkle" :size="14" />قراءة الملصق</span></x-slot:actions>
+            <x-slot:actions><span class="lq-row lq-row--sm lq-muted kit-caption"><x-lq.icon name="sparkle" :size="14" />قراءة الملصق</span></x-slot:actions>
             <div class="lq-checks">
                 <x-lq.check-row label="الماركة" sheet="SUNBULAH" image="Sunbulah" status="match" />
                 <x-lq.check-row label="الحجم" sheet="1 كغ" image="1 kg" status="match" />
@@ -575,6 +731,14 @@
                 window.Laqta.toast(messages[variant], { variant: variant });
             });
         });
+        var askButton = document.querySelector('[data-kit-ask]');
+        var askOut = document.querySelector('[data-kit-ask-out]');
+        if (askButton && askOut) {
+            askButton.addEventListener('click', function () {
+                window.Laqta.ask({ title: 'نحذف 3 صور مرفوضة؟', text: 'رح تنحذف من السجل ولا يمكن استرجاعها.', danger: true })
+                    .then(function (ok) { askOut.textContent = ok ? 'اخترت: أكيد' : 'اخترت: لا، رجوع'; });
+            });
+        }
         var period = document.getElementById('kit-period');
         var out = document.querySelector('[data-kit-period-out]');
         if (period && out) {

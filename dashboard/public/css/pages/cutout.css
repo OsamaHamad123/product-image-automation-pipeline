@@ -1,6 +1,17 @@
-/* لقطة · «فحص القص» (resources/views/dashboard/cutout_check.blade.php, js/review/cutout.js).
+/* لقطة · «فحص القص»: the review screen's third mode (/catalog?mode=cutout, js/review/cutout.js mounts into .cq-mode;
+   the Blade skeleton is review/shell.blade.php). Loaded next to review.css: every class here is cq-*, none rv-*.
    Every picture on the app's dark and light themes and on a checkerboard side by side; the backgrounds are the
    theme_preview.js classes (rv-theme--dark / --light / --checker), the same colours as the review screen. */
+
+/* the mode's box: the review page has no main padding (lq-main--flush), so it pads itself like the bulk header */
+.cq-mode {
+    padding: var(--lq-space-6) var(--lq-space-8) var(--lq-space-8);
+    min-width: 0;
+}
+
+.cq-mode[hidden] {
+    display: none;
+}
 
 .cq {
     display: flex;
@@ -10,7 +21,36 @@
 }
 
 .cq__header {
+    display: flex;
+    flex-wrap: wrap;
     align-items: flex-start;
+    justify-content: space-between;
+    gap: var(--lq-space-4);
+}
+
+.cq__titles {
+    display: flex;
+    flex: 1 1 320px;
+    flex-direction: column;
+    gap: var(--lq-space-1);
+    min-width: 0;
+}
+
+.lq-body .cq__h1,
+.cq__h1 {
+    margin: 0;
+    font-family: var(--lq-font-display);
+    font-size: var(--lq-fs-2xl);
+    font-weight: 600;
+    line-height: var(--lq-lh-tight);
+}
+
+.cq__desc {
+    max-width: 70ch;
+    margin: 0;
+    color: var(--lq-text-2);
+    font-size: var(--lq-fs-xs);
+    line-height: var(--lq-lh-relaxed);
 }
 
 .cq__filters {
@@ -26,13 +66,14 @@
     gap: var(--lq-space-2);
     margin: 0;
     color: var(--lq-text-2);
-    font-size: 13px;
-    line-height: 1.7;
+    font-size: var(--lq-fs-xs);
+    line-height: var(--lq-lh-relaxed);
 }
 
 .cq__grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(min(100%, 400px), 1fr));
+    /* the review screen's width: 3 columns on a wide desktop, 2 on a laptop, 1 on a phone */
+    grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
     gap: var(--lq-space-4);
     min-width: 0;
 }
@@ -40,7 +81,7 @@
 .cq__empty {
     margin: 0;
     color: var(--lq-text-3);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
 }
 
 .cq-card {
@@ -81,7 +122,7 @@
 
 .cq-card__brand {
     color: var(--lq-text-3);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
 }
 
 .cq-flags {
@@ -100,7 +141,7 @@
     color: var(--lq-warning);
     font-size: var(--lq-fs-xs);
     font-weight: 500;
-    line-height: 1.6;
+    line-height: var(--lq-lh-base);
 }
 
 .cq-flag--white,
@@ -122,7 +163,7 @@
 .cq-card__label {
     margin: 0;
     color: var(--lq-text-2);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
     font-weight: 600;
 }
 
@@ -201,7 +242,7 @@
     margin: 0;
     color: var(--lq-text-3);
     font-size: var(--lq-fs-xs);
-    line-height: 1.6;
+    line-height: var(--lq-lh-base);
 }
 
 .cq-card__new {
@@ -215,8 +256,8 @@
 .cq-card__msg {
     margin: 0;
     color: var(--lq-text-2);
-    font-size: 13px;
-    line-height: 1.7;
+    font-size: var(--lq-fs-xs);
+    line-height: var(--lq-lh-relaxed);
 }
 
 .cq-card__msg:empty {
@@ -242,7 +283,7 @@
 
 .cq__page {
     color: var(--lq-text-2);
-    font-size: 13px;
+    font-size: var(--lq-fs-xs);
 }
 
 .cq-log {
@@ -311,12 +352,16 @@
 }
 
 @media (max-width: 980px) {
-    .cq__grid {
-        grid-template-columns: repeat(auto-fill, minmax(min(100%, 340px), 1fr));
+    .cq-mode {
+        padding: var(--lq-space-5) var(--lq-space-6) var(--lq-space-6);
     }
 }
 
 @media (max-width: 560px) {
+    .cq-mode {
+        padding: var(--lq-space-5) var(--lq-space-4) var(--lq-space-6);
+    }
+
     .cq {
         gap: var(--lq-space-3);
     }
@@ -325,12 +370,26 @@
         padding: var(--lq-space-3);
     }
 
+    /* the three backgrounds swipe sideways, each one big enough to see the edges; the next one peeks in */
     .cq-stages {
-        gap: 6px;
+        display: flex;
+        gap: var(--lq-space-2);
+        max-width: 100%;
+        overflow-x: auto;
+        overscroll-behavior-x: contain;
+        scroll-snap-type: x mandatory;
+        scrollbar-width: thin;
+        padding-block-end: 4px;
+    }
+
+    .cq-stages > .cq-shot,
+    .cq-stages > .cq-stage {
+        flex: 0 0 78%;
+        scroll-snap-align: center;
     }
 
     .cq-stage {
-        padding: 4px;
+        padding: 6px;
     }
 
     .cq-card__actions .lq-btn {

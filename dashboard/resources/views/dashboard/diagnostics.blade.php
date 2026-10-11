@@ -35,16 +35,14 @@
 @php
     $healthDots = ['success' => 'lq-dot--success', 'danger' => 'lq-dot--danger', 'warning' => 'lq-dot--warning', 'info' => 'lq-dot--info', 'muted' => 'lq-dot--muted'];
     $nowIcons = ['ok' => 'check', 'attention' => 'alert', 'checking' => 'refresh'];
+    // the card's heading is what the service does; the provider's name stays beside it, muted
+    $serviceRoles = ['google_sheets' => 'شيت المنتجات', 'serper' => 'البحث عن الصور', 'gemini' => 'قارئ الملصق',
+        'photoroom' => 'عزل الخلفية', 'cloudinary' => 'رفع الصور'];
 @endphp
 
 @section('content')
 <div class="lq-health" data-health-page data-settings-url="{{ route('dashboard.settings') }}">
-    <header class="lq-page-header lq-health__header">
-        <div class="lq-page-header__text">
-            <h1 class="lq-page-title">الصحة والتكلفة</h1>
-            <p class="lq-page-header__desc">إذا في شي بدو منك بتلاقيه هون، مع زر لتصليحه. الأرقام والسجلات تحت بـ«تفاصيل متقدمة».</p>
-        </div>
-    </header>
+    <x-lq.page-header class="lq-health__header" title="الصحة والتكلفة" description="إذا في شي بدو منك بتلاقيه هون، مع زر لتصليحه. الأرقام والسجلات تحت بـ«تفاصيل متقدمة»." />
 
     {{-- «كلشي تمام» / «شو بدو منك» (HealthAttentionController): الحالة بكلمة وحدة، وكل بند بزر لتصليحه --}}
     <section class="lq-card lq-health-now" data-health="now" data-state="{{ $attention['state'] }}" aria-labelledby="lq-health-now-title">
@@ -75,13 +73,6 @@
     </section>
     <script type="application/json" id="lq-health-attention-initial">@json($attention)</script>
 
-    {{-- «روح على»: كل كرت بـ«تفاصيل متقدمة» بكبسة وحدة (health.js بيفتح القسم لأي #id جوّاه، بالرابط أو بالكبسة) --}}
-    <x-lq.jump-links class="lq-health__jump" :links="[
-        ['#services', 'الخدمات'], ['#publish-check', 'فحص النشر'], ['#search-ops', 'البحث والتكلفة'],
-        ['#lanes', 'دقة الاقتراحات'], ['#local-index', 'فهرس المتاجر'], ['#logs', 'السجل'],
-        ['#eval-export', 'مجموعة اختبار', true], ['#reprocess', 'إعادة القص', true],
-    ]" />
-
     {{-- «تفاصيل متقدمة»: كل البطاقات المفصّلة متل ما كانت، مسكّرة بالبداية. بطاقة جديدة بتنحط بآخر .lq-health-advanced__body --}}
     <details class="lq-health-advanced" data-health="advanced">
         <summary class="lq-health-advanced__summary">
@@ -98,7 +89,7 @@
         </p>
         <div class="lq-health__check">
             <x-lq.button variant="secondary" size="lg" icon="refresh" data-health="run-check" data-lq-admin><span data-health="run-check-label">فحص الاتصالات الآن</span></x-lq.button>
-            <span class="lq-health__check-note" id="diagCheckNote">بيستخدم استعلام Serper واحد وطلب PhotoRoom واحد، وما بياخد أكتر من 45 ثانية.</span>
+            <span class="lq-health__check-note" id="diagCheckNote">بيكلّف بحث صور واحد وطلب عزل خلفية واحد، وما بياخد أكتر من 45 ثانية. <span class="lq-subtle">(Serper · PhotoRoom)</span></span>
         </div>
     </section>
 
@@ -108,7 +99,7 @@
         @foreach ($services as $service)
             <article class="lq-health-service" id="card-{{ $service['key'] }}" data-service="{{ $service['key'] }}" data-tone="{{ $service['tone'] }}">
                 <div class="lq-health-service__head">
-                    <h2 class="lq-health-service__name">{{ $service['name'] }}</h2>
+                    <h2 class="lq-health-service__name">{{ $serviceRoles[$service['key']] ?? $service['name'] }} @isset($serviceRoles[$service['key']])<span class="lq-subtle" dir="ltr">{{ $service['name'] }}</span>@endisset</h2>
                     <span class="lq-dot lq-dot--lg {{ $healthDots[$service['tone']] ?? 'lq-dot--muted' }}" data-service-dot aria-hidden="true"></span>
                 </div>
                 <span class="lq-health-service__state" data-service-state>{{ $service['state'] }}</span>
@@ -138,7 +129,8 @@
             </div>
             <div class="lq-health-publish__action">
                 <x-lq.button variant="primary" icon="play" data-health="publish-run" data-lq-admin><span data-health="publish-run-label">افحص النشر</span></x-lq.button>
-                <span class="lq-health-publish__cost" id="publishCheckNote">ممكن يكلّف طلب عزل خلفية واحد (ونادراً أكتر إذا ما زبط العزل من أول مرة) وقراءة Gemini وحدة إذا مفتاحها محفوظ. الصورة التجريبية بتنرفع على Cloudinary وبتنمسح، وبالشيت منكتب عنوان عمود الرابط نفسه فوق حاله. عادةً بيخلص بأقل من دقيقة، وما بيطول أكتر من 7 دقايق.</span>
+                <span class="lq-health-publish__cost" id="publishCheckNote">ممكن يكلّف طلب عزل خلفية واحد، وعادةً بيخلص بأقل من دقيقة.</span>
+                <details class="lq-health-publish__cost"><summary class="lq-link">تفاصيل</summary>ونادراً أكتر من طلب إذا ما زبط العزل من أول مرة، وقراءة ملصق وحدة (Gemini) إذا مفتاحها محفوظ. الصورة التجريبية بتنرفع على Cloudinary وبتنمسح، وبالشيت منكتب عنوان عمود الرابط نفسه فوق حاله، وما بيطول أكتر من 7 دقايق.</details>
             </div>
         </div>
 
@@ -309,7 +301,8 @@
          --from-db). الزر وحده يشغّله؛ بيرجع وين الملف ورابط تنزيله (health.js createEvalExport). --}}
     <section class="lq-card lq-card--compact lq-health-eval" id="eval-export" aria-labelledby="lq-health-eval-title" data-health="eval-card" data-lq-admin>
             <h2 class="lq-card__title" id="lq-health-eval-title">مجموعة اختبار من مراجعاتك</h2>
-            <p class="lq-card__meta">بتجمع المنتجات اللي راجعتها (اللي اعتمدتها واللي رفضتها) مع الصور اللي عرضها البحث، بنسخ صغيرة، بملف واحد بتبعته للفريق ليقيسوا دقة البحث على منتجاتك الحقيقية. ما بتعمل أي بحث ولا بتكلّف شي، وما بيطلع فيها أي مفتاح أو بيانات دخول.</p>
+            <p class="lq-card__meta">ملف واحد من مراجعاتك بتبعته للفريق ليقيسوا دقة البحث؛ ما بيكلّف شي وما فيه أي مفتاح.</p>
+            <details><summary class="lq-link">تفاصيل</summary><p class="lq-field__hint">بتجمع المنتجات اللي راجعتها (اللي اعتمدتها واللي رفضتها) مع الصور اللي عرضها البحث، بنسخ صغيرة، ليقيسوا دقة البحث على منتجاتك الحقيقية. ما بتعمل أي بحث، وما بيطلع فيها أي مفتاح أو بيانات دخول.</p></details>
             <div class="lq-card__header">
                 <p class="lq-health__footnote" data-health="eval-export-status" role="status" aria-live="polite" dir="auto"></p>
                 <x-lq.button variant="secondary" size="sm" icon="upload" data-health="eval-export"><span data-health="eval-export-label">صدّر مجموعة اختبار</span></x-lq.button>
@@ -325,7 +318,8 @@
          scripts/reprocess_transparent.py; health.js createReprocess). «احسب» ما بيغيّر شي؛ «ابدأ» دفعة بسقف. --}}
     <section class="lq-card lq-card--compact lq-health-reprocess" id="reprocess" aria-labelledby="reprocess-title" data-health="reprocess" data-lq-admin>
         <h2 class="lq-card__title" id="reprocess-title">صور قديمة بخلفية بيضا</h2>
-        <p class="lq-card__meta">الصور اللي انتشرت قبل الخلفية الشفافة بتبين مربع أبيض بالوضع الغامق بالتطبيق. «احسب» بيعدّها وبيقلك قديش بتكلّف نعيد قصها شفافة، بدون ما يغيّر شي. الصف اللي غيّرت صورته بإيدك ما منلمسه، وكل صورة بتنعاد بتنسجّل وفيك ترجّعها من «فحص القص».</p>
+        <p class="lq-card__meta">«احسب» بيقلك قديش بتكلّف نعيد قص الصور القديمة شفافة، بدون ما يغيّر شي.</p>
+        <details><summary class="lq-link">تفاصيل</summary><p class="lq-field__hint">الصور اللي انتشرت قبل الخلفية الشفافة بتبين مربع أبيض بالوضع الغامق بالتطبيق. الصف اللي غيّرت صورته بإيدك ما منلمسه، وكل صورة بتنعاد بتنسجّل وفيك ترجّعها من «فحص القص».</p></details>
         <div class="lq-card__header">
             <p class="lq-health__footnote" data-health="reprocess-status" role="status" aria-live="polite" dir="auto"></p>
             <x-lq.button variant="secondary" size="sm" icon="search" data-health="reprocess-plan"><span data-health="reprocess-plan-label">احسب</span></x-lq.button>
@@ -335,12 +329,20 @@
             <label class="lq-field"><span class="lq-field__label">أقصى تكلفة (دولار)</span><input type="number" class="lq-input lq-input--sm" name="max_usd" min="0.01" max="100" step="0.01" value="1" dir="ltr" inputmode="decimal" data-health="reprocess-usd"></label>
             <x-lq.button variant="primary" size="sm" icon="play" type="submit" data-health="reprocess-start"><span data-health="reprocess-start-label">ابدأ</span></x-lq.button>
         </form>
-        <a class="lq-link" href="{{ route('dashboard.cutout_check') }}">افتح «فحص القص»</a>
+        <a class="lq-link" href="{{ route('dashboard.catalog', ['mode' => 'cutout']) }}">افتح «فحص القص»</a>
     </section>
 
     {{-- بطاقات متقدمة إضافية بتنحط هون (<section class="lq-card lq-card--compact">) --}}
         </div>
     </details>
+
+    {{-- «روح على»: سطر صغير تحت شريط «تفاصيل متقدمة» (مش فوقه، لحتى ما يبين أهم منه). health.js بيفتح القسم لأي #id جوّاه،
+         بالرابط أو بالكبسة --}}
+    <x-lq.jump-links class="lq-health__jump" :links="[
+        ['#services', 'الخدمات'], ['#publish-check', 'فحص النشر'], ['#search-ops', 'البحث والتكلفة'],
+        ['#lanes', 'دقة الاقتراحات'], ['#local-index', 'فهرس المتاجر'], ['#logs', 'السجل'],
+        ['#eval-export', 'مجموعة اختبار', true], ['#reprocess', 'إعادة القص', true],
+    ]" />
 </div>
 @endsection
 
