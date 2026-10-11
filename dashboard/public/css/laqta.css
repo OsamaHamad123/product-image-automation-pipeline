@@ -102,7 +102,7 @@
     --lq-accent-ring: var(--lq-teal-300);
     --lq-accent-wash: var(--lq-teal-50);
     --lq-on-accent: var(--lq-text-on-dark);
-    --lq-on-accent-tint: rgba(255, 255, 255, 0.2);      /* a count or key inside a solid button */
+    --lq-on-accent-tint: rgba(4, 32, 29, 0.24);         /* a count or key inside a solid button: darkens, so white text stays 4.5:1 */
     --lq-on-accent-track: rgba(255, 255, 255, 0.35);    /* a spinner's track inside a solid button */
     --lq-scrim: rgba(11, 34, 38, 0.45);                 /* behind a dialog */
     --lq-ink-hover: rgba(18, 49, 58, 0.6);              /* a sidebar item under the pointer */
@@ -755,7 +755,7 @@ html:has(.lq-body) {
     white-space: nowrap;
 }
 
-.lq-sidebar__user .lq-btn--ghost {
+.lq-body .lq-sidebar__user .lq-btn--ghost {
     color: var(--lq-ink-fg);
 }
 
@@ -2751,7 +2751,6 @@ a.lq-btn[aria-disabled="true"] {
     border-radius: 5px;
     font-family: var(--lq-font-mono);
     font-size: var(--lq-fs-2xs);
-    opacity: 0.8;
 }
 
 .lq-goto-backdrop {
