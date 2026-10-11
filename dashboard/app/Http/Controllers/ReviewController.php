@@ -10,7 +10,8 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 
 /**
- * المراجعة (/catalog): شاشة واحدة بوضعين، «منتج واحد» و«بالجملة» (?mode=bulk)، على هوية لقطة.
+ * المراجعة (/catalog): شاشة واحدة بوضعين، «منتج واحد» و«بالجملة» (?mode=bulk)، على هوية لقطة، وللمدير وضع ثالث
+ * «فحص القص» (?mode=cutout، بياناته من /api/cutout/* بـ RecutController).
  *
  * مصدر كل رقم في الشاشة:
  * - المنتجات وصورها المرشحة واعتماداتها وأعطالها: GET /api/products-json
@@ -23,7 +24,8 @@ use Illuminate\Support\Facades\Schema;
  */
 class ReviewController extends Controller
 {
-    public const MODES = ['single', 'bulk'];
+    /** cutout: «فحص القص» (RecutController، public/js/review/cutout.js)، للمدير بس: المراجع بيرجع لـ single. */
+    public const MODES = ['single', 'bulk', 'cutout'];
 
     /**
      * قيم ?filter= المقبولة: رقاقات المراجعة، نفس المجموعة بالوضعين (core.js FILTERS). eligible: مقترحة بلا تحذير،
@@ -55,7 +57,13 @@ class ReviewController extends Controller
 
     public function page(Request $request)
     {
-        $mode = in_array($request->query('mode'), self::MODES, true) ? (string) $request->query('mode') : 'single';
+        $reviewer = (bool) $request->user()?->isReviewer();
+        $modeParam = in_array($request->query('mode'), self::MODES, true) ? (string) $request->query('mode') : null;
+        // ?mode=cutout لمراجع (رابط قديم أو منسوخ): شاشة المراجعة العادية بدل صفحة 403
+        if ($modeParam === 'cutout' && $reviewer) {
+            $modeParam = null;
+        }
+        $mode = $modeParam ?? 'single';
         $filter = in_array($request->query('filter'), self::FILTERS, true) ? (string) $request->query('filter') : null;
         // ?row[]=1 يصل مصفوفة: تحويلها لنص كان يرمي «Array to string conversion» (HTTP 500)
         $rowParam = $request->query('row', '');
@@ -75,7 +83,7 @@ class ReviewController extends Controller
             'mode' => $mode,
             // ?mode= أو ?row= بالرابط: الوضع محدد. بدونهم الصفحة بتختار (آخر وضع اختاره المراجع، أو «بالجملة» لما يكون
             // في 10 صور مقترحة بلا تحذير أو أكثر)
-            'modeExplicit' => in_array($request->query('mode'), self::MODES, true) || $row !== null || $q !== '',
+            'modeExplicit' => $modeParam !== null || $row !== null || $q !== '',
             'filter' => $filter,
             'row' => $row,
             'reason' => $reason,
@@ -109,14 +117,16 @@ class ReviewController extends Controller
                 'bgMethod' => url('/api/settings/bg-method'),
                 // سطر «النشر التلقائي لكل الماركات المؤكدة» بوضع الجملة: أرقام فئة strict من بطاقة الصحة (HealthController::reviewLanes)
                 'reviewLanes' => url('/api/system/review-lanes'),
-                // «فحص القص» (RecutController): الصور المنشورة على الغامق والفاتح والمربعات، رابط تحت فلاتر القائمة
-                'cutoutCheck' => route('dashboard.cutout_check'),
+                // «فحص القص» (RecutController): الصور المنشورة على الغامق والفاتح والمربعات، وضع ثالث بنفس الشاشة
+                'cutoutCheck' => route('dashboard.catalog', ['mode' => 'cutout']),
             ],
             // طريقة عزل الخلفية الحالية ونص تأكيد التجاوز؛ null بلا قاعدة بيانات (ما في زر لأن الحفظ رح يفشل)
             'bg' => $dbOnline ? self::bgConfig() : null,
+            // وضع «فحص القص» (cutout.js): مساراته وعلاماته؛ null للمراجع = ما في زر «فحص القص» بالتبديل
+            'cutout' => $reviewer ? null : RecutController::cutoutConfig(),
         ];
         // المراجع (ReviewerLimits): بلا روابط وأزرار المدير. رابط فاضي = الشاشة ما بترسم زرّه
-        if ($request->user()?->isReviewer()) {
+        if ($reviewer) {
             foreach (['retry', 'run', 'bgMethod', 'cutoutCheck'] as $adminOnly) {
                 $config['urls'][$adminOnly] = '';
             }

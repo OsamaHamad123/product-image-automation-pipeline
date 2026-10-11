@@ -1,14 +1,31 @@
 {{--
     هيكل شاشة المراجعة قبل تشغيل السكربت: نفس تقسيم التصميم مع هياكل تحميل، وعدد «بانتظار المراجعة» من الخادم
     (نفس رقم الشارة). app.js يستبدل ما بداخل #rvApp بالواجهة الحية.
-    $config: ReviewController::page (mode, filter, row, canvas, db, readyForReview, urls)    $dbOnline: bool
+    $config: ReviewController::page (mode, filter, row, canvas, db, readyForReview, urls, cutout)    $dbOnline: bool
+    mode: single | bulk | cutout («فحص القص»، للمدير بس)
 --}}
 @php
     $rvReady = $config['readyForReview'] ?? null;
     $rvCount = $rvReady === null ? '—' : $rvReady . ' بانتظار المراجعة';
 @endphp
 <div id="rvApp" class="rv-app" data-mode="{{ $config['mode'] }}" data-config="{{ json_encode($config, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) }}" aria-busy="true">
-    @if ($config['mode'] === 'bulk')
+    @if ($config['mode'] === 'cutout')
+        {{-- «فحص القص» (المدير بس): cutout.js بيبني الواجهة بمكانه (R.cutout.mount) --}}
+        <section class="cq-mode" aria-label="فحص القص">
+            <div class="cq">
+                <header class="cq__header">
+                    <div class="cq__titles">
+                        <h1 class="cq__h1">فحص القص</h1>
+                    </div>
+                </header>
+                <div class="cq__grid" aria-hidden="true">
+                    @for ($i = 0; $i < 4; $i++)
+                        <div class="cq-card cq-card--skeleton"><span class="lq-skeleton lq-skeleton--text"></span><div class="cq-stages"><span class="lq-skeleton cq-stage"></span><span class="lq-skeleton cq-stage"></span><span class="lq-skeleton cq-stage"></span></div></div>
+                    @endfor
+                </div>
+            </div>
+        </section>
+    @elseif ($config['mode'] === 'bulk')
         <section class="rv-bulk" aria-label="المراجعة بالجملة">
             <div class="rv-bulk__top">
                 <header class="rv-bulk__head">

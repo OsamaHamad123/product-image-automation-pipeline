@@ -116,7 +116,8 @@
             dataset: { mode: mode }, 'aria-pressed': mode === current ? 'true' : 'false'
         }, [icon(iconName, 16), el('span', { text: label })]);
         const box = el('div', { className: 'lq-segmented lq-segmented--sm rv-modes', role: 'group', 'aria-label': 'طريقة العرض' }, [
-            item('single', 'منتج واحد', 'image'), item('bulk', 'بالجملة', 'grid')
+            item('single', 'منتج واحد', 'image'), item('bulk', 'بالجملة', 'grid'),
+            modeAllowed('cutout') ? item('cutout', 'فحص القص', 'scissors') : null     // للمدير بس (cfg.cutout)
         ]);
         box.addEventListener('click', e => {
             const b = e.target && e.target.closest ? e.target.closest('[data-mode]') : null;
@@ -1549,6 +1550,10 @@
 
     function currentParams() {
         const params = new URLSearchParams();
+        if (S.mode === 'cutout') {
+            params.set('mode', 'cutout');
+            return params;
+        }
         if (S.mode === 'bulk') {
             params.set('mode', 'bulk');
             if (S.filter && S.filter !== 'all') params.set('filter', S.filter);
@@ -1582,12 +1587,27 @@
         }
     }
 
-    // المراجع ضغط «منتج واحد» أو «بالجملة»: الوضع بينحفظ لهالمتصفح، والفلتر والماركة بيضلّوا
+    // «فحص القص» (cutout.js) وضع ثالث للمدير بس: ReviewController::page بيبعت cfg.cutout بس إله
+    function modeAllowed(mode) {
+        return mode === 'single' || mode === 'bulk' || (mode === 'cutout' && !!(S.cfg && S.cfg.cutout) && !!R.cutout);
+    }
+
+    // صندوق «فحص القص» بينبنى أول مرة بس، وبيضل مركّب (قص جديد بيستنى ما بيضيع لما تروح وترجع)
+    function showCutout() {
+        const d = S.dom;
+        if (!d.cutout) {
+            d.cutout = el('section', { className: 'cq-mode', 'aria-label': 'فحص القص' });
+            d.root.insertBefore(d.cutout, d.float || null);
+            R.cutout.mount(d.cutout, { config: S.cfg.cutout, toggle: modeToggle('cutout') });
+        }
+    }
+
+    // المراجع ضغط «منتج واحد» أو «بالجملة»: الوضع بينحفظ لهالمتصفح، والفلتر والماركة بيضلّوا («فحص القص» ما بينحفظ)
     function chooseMode(mode, opts) {
-        if (!['single', 'bulk'].includes(mode)) return;
+        if (!modeAllowed(mode)) return;
         S.modeChosen = true;
         try {
-            if (root.localStorage) root.localStorage.setItem(MODE_STORE, mode);
+            if (root.localStorage && mode !== 'cutout') root.localStorage.setItem(MODE_STORE, mode);
         } catch (e) {
             // تخزين ممنوع: الاختيار بيضل لهالجلسة بس
         }
@@ -1597,12 +1617,14 @@
 
     function setMode(mode, opts) {
         opts = opts || {};
-        if (!['single', 'bulk'].includes(mode)) return;
+        if (!modeAllowed(mode)) return;
         S.mode = mode;
         const d = S.dom;
         d.root.setAttribute('data-mode', mode);
         d.single.hidden = mode !== 'single';
         d.bulk.hidden = mode !== 'bulk';
+        if (mode === 'cutout') showCutout();
+        if (d.cutout) d.cutout.hidden = mode !== 'cutout';
         d.root.querySelectorAll('.rv-modes__item').forEach(b => {
             const on = b.getAttribute('data-mode') === mode;
             b.classList.toggle('is-active', on);
@@ -1622,7 +1644,7 @@
             renderList();
             if (key && S.byKey.get(key)) R.single.openItem(key, { from: 'mode', noUrl: true });
             else R.single.renderWorkspace();
-        } else {
+        } else if (mode === 'bulk') {
             renderList();
             R.bulk.render();
         }
@@ -1635,7 +1657,7 @@
 
     function onPopState() {
         const params = new URLSearchParams(root.location.search);
-        const mode = params.get('mode') === 'bulk' ? 'bulk' : 'single';
+        const mode = modeAllowed(params.get('mode')) ? params.get('mode') : 'single';
         const row = parseInt(params.get('row') || '', 10);
         const filter = params.get('filter');
         if (filter && R.FILTERS.some(f => f.key === filter)) S.filter = filter;
@@ -2184,9 +2206,9 @@
         }
         S.cfg = cfg;
         S.urls = Object.assign({}, DEFAULT_URLS, cfg.urls || {});
-        S.mode = cfg.mode === 'bulk' ? 'bulk' : 'single';
+        S.mode = modeAllowed(cfg.mode) ? cfg.mode : 'single';
         // ?mode= أو ?row= بالرابط: الوضع محدد. وإلا آخر وضع اختاره المراجع (localStorage)، وإلا بيقرر chooseInitial
-        S.modeExplicit = !!cfg.modeExplicit || cfg.mode === 'bulk' || !!cfg.row;
+        S.modeExplicit = !!cfg.modeExplicit || S.mode !== 'single' || !!cfg.row;
         if (!S.modeExplicit) {
             const stored = readStoredMode();
             if (stored) {

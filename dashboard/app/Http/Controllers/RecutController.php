@@ -13,7 +13,7 @@ use Illuminate\Http\Request;
  *                                     ما بتغيّر شي.
  *   POST /api/system/reprocess/start «ابدأ» بدفعة بسقف (عدد صور وتكلفة) كعملية خلفية (cli_bridge reprocess_start).
  *   GET  /api/system/reprocess       حالة آخر دفعة من temp/reprocess_state.json (بلا جسر).
- * - صفحة «فحص القص» (/cutout-check، public/js/review/cutout.js): الصور المنشورة على الغامق والفاتح والمربعات، مع علامات
+ * - وضع «فحص القص» بشاشة المراجعة (/catalog?mode=cutout، public/js/review/cutout.js؛ /cutout-check بيحوّل لهون): الصور المنشورة على الغامق والفاتح والمربعات، مع علامات
  *   القص؛ «أعد القص بـPhotoRoom» / «جرّب القص المحلي» بيعملوا قص جديد بيستنى (ما بينرفع)، «اعتمد الجديد» بينشره كنسخة
  *   جديدة (نفس طريق الدفعة: طابور الكتابة ورابط برقم نسخة جديد)، «خلّي القديم» بيمسحه، و«رجّع القديم» بيتراجع عن تبديل.
  *   ولا شي بيتبدّل لحاله: كل تبديل بكبسة المالك وبيتسجّل.
@@ -161,19 +161,24 @@ class RecutController extends Controller
     // «فحص القص»
     // ------------------------------------------------------------------
 
+    /** /cutout-check القديم: «فحص القص» صار وضع ثالث بشاشة المراجعة (ReviewController::page، ?mode=cutout). */
     public function page()
     {
-        return view('dashboard.cutout_check', [
-            'cutoutConfig' => [
-                'urls' => [
-                    'gallery' => url('/api/cutout/gallery'), 'try' => url('/api/cutout/try'),
-                    'apply' => url('/api/cutout/apply'), 'discard' => url('/api/cutout/discard'),
-                    'undo' => url('/api/cutout/undo'), 'review' => route('dashboard.catalog'),
-                    'health' => route('dashboard.diagnostics'),
-                ],
-                'flags' => self::FLAGS,
+        return redirect()->route('dashboard.catalog', ['mode' => 'cutout']);
+    }
+
+    /** مسارات وضع «فحص القص» وعلاماته، بتنمرق لـ cutout.js بإعدادات شاشة المراجعة (للمدير بس). */
+    public static function cutoutConfig(): array
+    {
+        return [
+            'urls' => [
+                'gallery' => url('/api/cutout/gallery'), 'try' => url('/api/cutout/try'),
+                'apply' => url('/api/cutout/apply'), 'discard' => url('/api/cutout/discard'),
+                'undo' => url('/api/cutout/undo'), 'review' => route('dashboard.catalog'),
+                'health' => route('dashboard.diagnostics'),
             ],
-        ]);
+            'flags' => self::FLAGS,
+        ];
     }
 
     /** رسالة الخطأ لرمز (أو الجملة العامة). */

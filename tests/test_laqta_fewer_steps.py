@@ -111,11 +111,11 @@ console.log(JSON.stringify({ afterTyping, typingPrevented: typing.defaultPrevent
 
 def test_goto_index_lists_every_hidden_tool_and_marks_the_owners_ones():
     goto = read(GOTO)
-    for href in ("/cutout-check", "/setup", "/batch-automation#run-barcodes", "/batch-automation#run-export",
+    for href in ("/catalog?mode=cutout", "/setup", "/batch-automation#run-barcodes", "/batch-automation#run-export",
                  "/system-diagnostics#search-ops", "/system-diagnostics#reprocess", "/system-diagnostics#eval-export",
                  "/catalog?filter=failed", "/catalog?mode=bulk"):
         assert f"'{href}'" in goto, href
-    for owner in ("'/cutout-check', 'cutout recut background', true", "'/setup', 'setup wizard onboarding', true",
+    for owner in ("'/catalog?mode=cutout', 'cutout recut background', true", "'/setup', 'setup wizard onboarding', true",
                   "'/batch-automation', 'run batch', true"):
         assert owner in goto
     assert "'/settings?tab=keys#lq-key-' . $id" in goto and "SettingsController::TABS" in goto
@@ -132,8 +132,8 @@ def test_the_layout_carries_the_places_for_each_role(role_pages):
         found[role] = {e["href"] for e in _json.loads(island.group(1))}
         assert re.search(r'<script src="[^"]*/js/jump\.js\?v=\d+"></script>', page)
         assert 'data-lq-goto-open' in page
-    assert "/cutout-check" in found["admin"] and "/settings?tab=keys#lq-key-serper" in found["admin"]
-    assert not any(h.startswith(("/batch-automation", "/settings", "/setup", "/cutout-check")) for h in found["reviewer"])
+    assert "/catalog?mode=cutout" in found["admin"] and "/settings?tab=keys#lq-key-serper" in found["admin"]
+    assert not any(h.startswith(("/batch-automation", "/settings", "/setup", "/catalog?mode=cutout", "/cutout-check")) for h in found["reviewer"])
     assert "/system-diagnostics#eval-export" not in found["reviewer"] and "/catalog?filter=failed" in found["reviewer"]
 
 

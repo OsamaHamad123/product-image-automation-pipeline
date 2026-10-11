@@ -31,7 +31,7 @@ class GotoIndex
             ['الصحة والتكلفة', self::PAGES, '/system-diagnostics', 'health cost diagnostics', false],
             ['الإعدادات', self::PAGES, '/settings', 'settings', true],
             ['جهّز لقطة (خطوات أول مرة)', self::PAGES, '/setup', 'setup wizard onboarding', true],
-            ['فحص القص: الصور المنشورة على الغامق والفاتح', self::PAGES, '/cutout-check', 'cutout recut background', true],
+            ['فحص القص: الصور المنشورة على الغامق والفاتح', self::PAGES, '/catalog?mode=cutout', 'cutout recut background', true],
 
             ['مقترحة', self::REVIEW, '/catalog?filter=proposed', 'proposed suggested', false],
             ['مقترحة بلا تحذير', self::REVIEW, '/catalog?filter=eligible', 'eligible', false],

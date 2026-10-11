@@ -335,7 +335,7 @@
             <label class="lq-field"><span class="lq-field__label">أقصى تكلفة (دولار)</span><input type="number" class="lq-input lq-input--sm" name="max_usd" min="0.01" max="100" step="0.01" value="1" dir="ltr" inputmode="decimal" data-health="reprocess-usd"></label>
             <x-lq.button variant="primary" size="sm" icon="play" type="submit" data-health="reprocess-start"><span data-health="reprocess-start-label">ابدأ</span></x-lq.button>
         </form>
-        <a class="lq-link" href="{{ route('dashboard.cutout_check') }}">افتح «فحص القص»</a>
+        <a class="lq-link" href="{{ route('dashboard.catalog', ['mode' => 'cutout']) }}">افتح «فحص القص»</a>
     </section>
 
     {{-- بطاقات متقدمة إضافية بتنحط هون (<section class="lq-card lq-card--compact">) --}}

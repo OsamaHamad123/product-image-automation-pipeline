@@ -156,7 +156,7 @@ def test_catalog_extends_the_laqta_layout_and_loads_the_review_scripts():
                       "@include('review.shell'"):
         assert directive in page_src, directive
     assert "css/pages/review.css" in page_src
-    assert "['core', 'ui', 'jobs', 'single', 'bulk', 'app']" in page_src
+    assert "['core', 'ui', 'jobs', 'single', 'bulk', 'cutout', 'app']" in page_src
     assert "<script>" not in page_src and "layouts.layout" not in page_src
     shell = read(SHELL)
     assert 'id="rvApp"' in shell and "data-config=\"{{ json_encode($config" in shell
@@ -651,7 +651,7 @@ def test_catalog_renders_truthfully_without_a_database(tmp_path):
     current = re.findall(r"<a href=\"([^\"]+)\"[^>]*aria-current=\"page\"", body)
     assert len(current) == 1 and current[0].endswith("/catalog")
     scripts = [m.group(1) for m in (re.search(r"/js/review/([a-z]+)\.js\?v=", src) for src in script_sources(body)) if m]
-    assert scripts == ["core", "ui", "jobs", "single", "bulk", "app"]
+    assert scripts == ["core", "ui", "jobs", "single", "bulk", "cutout", "app"]
     assert re.search(r'<link rel="stylesheet" href="[^"]*/css/pages/review\.css\?v=', body)
     cfg = _config_of(body)
     assert cfg["db"] == "offline" and cfg["readyForReview"] is None and cfg["mode"] == "single"

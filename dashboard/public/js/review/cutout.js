@@ -1,5 +1,6 @@
 /*
- * لقطة · «فحص القص» (resources/views/dashboard/cutout_check.blade.php, RecutController).
+ * لقطة · «فحص القص»: the review screen's third mode (/catalog?mode=cutout, admins only; /cutout-check redirects there).
+ * app.js gives it a box (R.cutout.mount(container, { config, toggle })), RecutController::cutoutConfig the urls.
  *
  * The published pictures, newest first, each on the app's dark and light themes and on a checkerboard side by side
  * (theme_preview.js apply), with the cut-check flags; a filter per flag. Per picture «أعد القص بـPhotoRoom» (one paid
@@ -11,7 +12,7 @@
  * Data: GET urls.gallery (?flag, ?page, ?measure: the server checks up to 24 pictures it never looked at per call),
  * POST urls.try {id, method: photoroom | local}, urls.apply {token}, urls.discard {token}, urls.undo {log_id}.
  * Web data only ever goes through textContent and attributes (ui.js el / img), never HTML. The pure helpers are
- * exported (R.cutout) for the node tests.
+ * exported (R.cutout) for the node tests. The page's own classes are cq-* (css/pages/cutout.css), apart from review.css.
  */
 (function (root) {
     'use strict';
@@ -130,23 +131,56 @@
         }));
     }
 
-    function mount(app) {
+    function skeleton() {
         const el = R.el;
-        let config = {};
-        try {
-            config = JSON.parse(app.getAttribute('data-config') || '{}') || {};
-        } catch (e) {
-            config = {};
+        return Array.from({ length: 4 }, () => el('div', { className: 'cq-card cq-card--skeleton', 'aria-hidden': 'true' }, [
+            el('span', { className: 'lq-skeleton lq-skeleton--text' }),
+            el('div', { className: 'cq-stages' }, [0, 1, 2].map(() => el('span', { className: 'lq-skeleton cq-stage' })))
+        ]));
+    }
+
+    /*
+     * Builds the whole «فحص القص» UI inside `container` (the review screen's cutout mode box, app.js) and loads the
+     * first page. opts.config: {urls, flags} (ReviewController::page cutout, RecutController::cutoutConfig), else the
+     * container's data-config; opts.toggle: a node for the header (the review screen's «منتج واحد | بالجملة | فحص القص»).
+     * Returns a handle { load, state, unmount }; mounting the same container twice returns the first handle.
+     */
+    function mount(container, opts) {
+        if (container.__cq) return container.__cq;
+        opts = opts || {};
+        const el = R.el;
+        let config = opts.config;
+        if (!config) {
+            try {
+                config = JSON.parse(container.getAttribute('data-config') || '{}') || {};
+            } catch (e) {
+                config = {};
+            }
         }
         const urls = config.urls || {};
-        const S = { flag: '', page: 1, data: null, busy: new Set(), tries: new Map(), loading: false };
-        const part = name => app.querySelector('[data-cq="' + name + '"]');
-        const filtersBox = part('filters');
-        const statusLine = part('status');
-        const grid = part('grid');
-        const pager = part('pager');
-        const logBox = part('log');
-        const logList = part('log-list');
+        const S = { flag: '', page: 1, data: null, busy: new Set(), tries: new Map(), loading: false, dead: false };
+        const filtersBox = el('div', { className: 'cq__filters', role: 'group', 'aria-label': 'فلترة حسب الملاحظة', dataset: { cq: 'filters' } });
+        const statusLine = el('p', { className: 'cq__status', role: 'status', 'aria-live': 'polite', dataset: { cq: 'status' }, text: 'عم نجيب الصور…' });
+        const grid = el('div', { className: 'cq__grid', dataset: { cq: 'grid' } }, skeleton());
+        const pager = el('nav', { className: 'cq__pager', 'aria-label': 'الصفحات', dataset: { cq: 'pager' }, hidden: true });
+        const logList = el('ul', { className: 'cq-log', dataset: { cq: 'log-list' } });
+        const logBox = el('section', { className: 'lq-card lq-card--compact cq__log', 'aria-labelledby': 'cq-log-title', dataset: { cq: 'log' }, hidden: true }, [
+            el('h2', { className: 'lq-card__title', id: 'cq-log-title', text: 'آخر التبديلات' }),
+            el('p', { className: 'lq-card__meta', text: 'كل صورة انبدلت من هون أو من «صور قديمة بخلفية بيضا». «رجّع القديم» بيرجّع الصورة اللي كانت، بنفس الطريق.' }),
+            logList
+        ]);
+        const app = el('div', { className: 'cq', 'aria-busy': 'true' }, [
+            el('header', { className: 'cq__header' }, [
+                el('div', { className: 'cq__titles' }, [
+                    el('h1', { className: 'cq__h1', text: 'فحص القص' }),
+                    el('p', { className: 'cq__desc', text: 'كل صورة منشورة على الغامق والفاتح والمربعات، متل ما بتبين بالتطبيق. ولا صورة بتتبدّل لحالها: كل تبديل بكبستك، وبينسجّل وفيك ترجّعه.' })
+                ]),
+                opts.toggle || null
+            ]),
+            filtersBox, statusLine, grid, pager, logBox
+        ]);
+        R.clear(container);
+        container.appendChild(app);
 
         function toast(text, variant) {
             if (R.toast) R.toast(text, variant);
@@ -159,7 +193,7 @@
 
         async function load(options) {
             options = options || {};
-            if (S.loading) return;
+            if (S.loading || S.dead) return;
             S.loading = true;
             app.setAttribute('aria-busy', 'true');
             if (!options.quiet) statusLine.textContent = options.measure === false ? 'عم نجيب الصور…' : 'عم نجيب الصور ونفحص اللي ما انفحصت… ممكن ياخد شوي.';
@@ -167,6 +201,7 @@
             if (S.flag) query.set('flag', S.flag);
             const res = await R.requestJson(urls.gallery + '?' + query.toString());
             S.loading = false;
+            if (S.dead) return;
             app.setAttribute('aria-busy', 'false');
             if (!res.ok || !res.data || res.data.status !== 'success') {
                 statusLine.textContent = errorText(res, 'ما قدرنا نجيب الصور المنشورة. جرّب مرة تانية.');
@@ -371,20 +406,30 @@
             renderLog();
         }
 
+        // بعد unmount: جواب طلب لسا بالطريق ما بيرسم شي (S.dead)
+        function unmount() {
+            S.dead = true;
+            if (container.__cq === handle) delete container.__cq;
+            R.clear(container);
+        }
+
+        const handle = { load: load, state: S, unmount: unmount, root: app };
+        container.__cq = handle;
         load({ measure: true });
-        return { load: load, state: S };
+        return handle;
+    }
+
+    function unmount(container) {
+        if (container && container.__cq) container.__cq.unmount();
+    }
+
+    // أيقونة «فحص القص» بالتبديل (app.js modeToggle): ui.js محمّل قبل هالملف
+    if (R.ICONS && !R.ICONS.scissors) {
+        R.ICONS.scissors = 'M6 9a3 3 0 1 0 0-6a3 3 0 1 0 0 6zM6 21a3 3 0 1 0 0-6a3 3 0 1 0 0 6zM20 4 8.1 15.9M14.5 14.5 20 20M8.1 8.1 12 12';
     }
 
     R.cutout = { FLAGS: FLAGS, flagText: flagText, pictures: pictures, statusText: statusText, applyText: applyText,
-                 tryText: tryText, errorText: errorText, photoroomNote: photoroomNote, mount: mount };
+                 tryText: tryText, errorText: errorText, photoroomNote: photoroomNote, mount: mount, unmount: unmount };
 
-    if (typeof document !== 'undefined' && document.getElementById) {
-        const start = () => {
-            const app = document.getElementById('cqApp');
-            if (app && !app.__cq) app.__cq = mount(app);
-        };
-        if (document.readyState === 'loading' && document.addEventListener) document.addEventListener('DOMContentLoaded', start);
-        else start();
-    }
     if (typeof module !== 'undefined' && module.exports) module.exports = R.cutout;
 })(typeof window !== 'undefined' ? window : globalThis);
