@@ -159,7 +159,11 @@ namespace Illuminate\Http {
 }
 namespace App\Http\Controllers {
     class Controller {}
-    class ProductController { public static function forgetProductCaches() {} }
+    class ProductController {
+        public static function forgetProductCaches() {}
+        // no current sheet_key: SheetScope filters and stamps nothing (the fallback)
+        public static function currentSheetKey() { return null; }
+    }
 }
 """
 
@@ -168,6 +172,7 @@ namespace App\Http\Controllers {
 def test_dashboard_save_candidates_after_a_row_shift_keeps_the_other_products_candidates():
     controller = str(ROOT / "dashboard" / "app" / "Http" / "Controllers" / "CurationController.php").replace("\\", "/")
     service = str(ROOT / "dashboard" / "app" / "Services" / "CandidateRow.php").replace("\\", "/")
+    scope = str(ROOT / "dashboard" / "app" / "Services" / "SheetScope.php").replace("\\", "/")
     stored = [
         # P's candidates, stored when P was at row 8 (P is now at row 9)
         {"row_number": 8, "sku_key": "sku-p", "image_url": "p1.jpg"},
@@ -185,6 +190,7 @@ def test_dashboard_save_candidates_after_a_row_shift_keeps_the_other_products_ca
 {PHP_STUBS}
 namespace {{
     require '{service}';
+    require '{scope}';
     require '{controller}';
     \\Illuminate\\Support\\Facades\\DB::$rows = json_decode({json.dumps(json.dumps(stored))}, true);
     $c = new \\App\\Http\\Controllers\\CurationController();
