@@ -762,7 +762,7 @@
         }
         // «تراجع» انضغط والرفض لسا ماشي: هلق انسجّل، فبينشال
         if (job.undo && job.type === 'reject') {
-            if (job.state === 'done') undoRejected(job);
+            if (job.state === 'done') undoRejected(job, { late: true });
             else if (S.jobs && typeof S.jobs.drop === 'function') S.jobs.drop(job.id);
         }
     }
@@ -936,8 +936,11 @@ ${candidate.url}` : item.key, productKey: item.key, stay: stay,
         else if (job.state === 'failed' && S.jobs && typeof S.jobs.drop === 'function') S.jobs.drop(job.id);
     }
 
-    async function undoRejected(job) {
+    // opts.late: «تراجع» انضغط والبحث الجديد لسا ماشي، والجواب وصل هلق (ممكن بعد دقيقة): المراجع بمنتج تاني، فما
+    // منقلب الشاشة عليه؛ القائمة بتتحدّث وإشعار بيقول إنه الصورة رجعت
+    async function undoRejected(job, opts) {
         const S = st();
+        const late = !!(opts && opts.late);
         const key = productKeyOf(job);
         const item = S.byKey.get(key);
         if (!item) return false;
@@ -954,7 +957,10 @@ ${candidate.url}` : item.key, productKey: item.key, stay: stay,
         if (S.local.get(key) === 'rejected') S.local.delete(key);
         sessionOf(key).note = '';
         R.rebuild();
-        if (S.mode === 'single') {
+        if (S.mode === 'single' && late && S.openKey !== key) {
+            R.renderList();
+            R.toast(`تراجعت عن رفض صورة «${now.product.product_name || `صف ${now.product.row_number}`}»: رجعت للاقتراحات.`, 'info');
+        } else if (S.mode === 'single') {
             R.renderList();
             openItem(key, { from: 'undo' });
         } else {

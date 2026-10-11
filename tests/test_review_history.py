@@ -243,3 +243,32 @@ await flush();
 out.text = document.getElementById('rvDialog').textContent;
 """, tmp_path, config={"row": 70})
     assert "Ctrl+Z أو ⌘Z" in out["text"] and "تراجع عن آخر قرار" in out["text"]
+
+
+@NEEDS_NODE
+def test_a_late_undo_does_not_pull_the_reviewer_back(tmp_path):
+    """«تراجع» while the new search still runs: the undo lands when the answer comes (maybe a minute later). By then the
+    reviewer is on another product, so the screen stays there and a toast says the picture is back."""
+    out = page(r"""
+openRow(70);
+press('x');
+press('1');
+await flush();
+const reject = requests('/api/reject_image')[0];
+out.before = productName();
+toasts.find(t => t.action).action.onClick();                 // «تراجع» before the search answers
+await flush();
+answer(reject, { status: 'review', decision: 'REVIEW_UNSELECTED', sku_key: 'key-70', candidates_saved: 0,
+                 rejection: { approval_kept: false, queue_status: 'ready_for_review', candidates_left: 0 } });
+await flush();
+const undo = requests('/api/review/undo-reject')[0];
+if (undo) answer(undo, { status: 'success' });
+await flush();
+out.after = productName();
+out.undone = !!undo;
+out.note = toasts.slice(-1)[0].text;
+""", tmp_path, config={"row": 70, "filter": "proposed"})
+    assert out["before"] == "Almarai Laban 1L"
+    assert out["undone"] is True
+    assert out["after"] == "Almarai Laban 1L"                  # still on the product the reviewer moved to
+    assert out["note"] == "تراجعت عن رفض صورة «Almarai Milk 1L»: رجعت للاقتراحات."
