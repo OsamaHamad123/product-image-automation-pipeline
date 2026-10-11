@@ -460,6 +460,13 @@
         return section ? section.querySelector('[data-setup-part="' + name + '"]') : null;
     }
 
+    // a check row's state in the shared text tones (setup.blade.php $setupText: the same rule)
+    var STATE_TONES = { success: 'lq-text--success', danger: 'lq-text--danger', warning: 'lq-text--warning' };
+
+    function stateTone(tone) {
+        return STATE_TONES[tone] || 'lq-text--muted';
+    }
+
     function renderRows(holder, rows) {
         clear(holder);
         (rows || []).forEach(function (row) {
@@ -470,7 +477,7 @@
             dot.setAttribute('aria-hidden', 'true');
             li.appendChild(dot);
             li.appendChild(make('span', 'lq-setup-check__label', row.label));
-            var st = make('span', 'lq-setup-check__state', row.state);
+            var st = make('span', 'lq-setup-check__state ' + stateTone(row.tone), row.state);
             st.setAttribute('dir', 'auto');
             li.appendChild(st);
             if (row.fix || row.href) {

@@ -11,6 +11,28 @@ causes: the quality gate threw away white-background packshots, an unverified "l
 success, siblings of the right product outranked it, and reviewers' rejections were never remembered. The search
 core was rebuilt and wired into the queue, the dashboard actions and the sheet writes. Every claim below has a test.
 
+### UI redesign, phase 5: notices, faster review, one design system everywhere
+
+- **«التنبيهات»: a bell in the sidebar and in «حسابي», with a panel (not a page) of the last 30 events.**
+  - The events: a run started, finished, stopped, failed or stuck; new products ready; server approvals that failed;
+    Health attention items.
+  - Each event has a link to the place to act. A reviewer never gets a link to an owner page.
+  - The panel reuses the existing batch-status poll, and asks for the attention items at most every 5 minutes, never
+    while the tab is hidden.
+  - Events are kept per browser, and two tabs don't repeat them.
+- **Review.**
+  - A reject with a new search no longer waits: the next product opens at once. When alternatives arrive, the product
+    comes back to its chip with «لقينا بدائل لـ …». Rejecting an alternative still stays on the product.
+  - «آخر قراراتك» lists the session's last 20 decisions, with «افتح», «تراجع» and «تراجع عن الرفض». It is kept in
+    sessionStorage.
+  - Ctrl+Z (⌘Z) undoes the last decision: a held one first, then the last sent reject, after asking.
+  - A late undo, one that lands after the search, leaves the screen where it is.
+- **Design system on «اليوم» and «النظام».**
+  - Page pills are shared tone chips.
+  - The four page tone-colour sets became `lq-text--*`.
+  - Service tiles are flat cards. Every tab opens on a section title.
+  - About 90 raw spacing values became `--lq-space-*`, none of them moved by more than 2px.
+
 ### UI redesign, phase 4: dark mode
 
 - **The switch.** «فاتح / غامق / تلقائي» sits in the sidebar user row, in the phone «حسابي» sheet and in the UI

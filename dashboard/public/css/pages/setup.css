@@ -66,10 +66,10 @@
 .lq-setup-steps__link {
     display: flex;
     align-items: center;
-    gap: 10px;
+    gap: var(--lq-space-3);
     min-width: 0;
     height: 100%;
-    padding: 10px 12px;
+    padding: var(--lq-space-2) var(--lq-space-3);
     border: 1px solid var(--lq-border);
     border-radius: var(--lq-radius-lg);
     background: var(--lq-surface);
@@ -156,7 +156,7 @@
 .lq-setup-step__head {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--lq-space-1);
 }
 
 .lq-setup-step__count {
@@ -165,13 +165,7 @@
     color: var(--lq-text-3);
 }
 
-.lq-setup-step__title {
-    margin: 0;
-    font-family: var(--lq-font-display);
-    font-size: var(--lq-fs-xl);
-    font-weight: 600;
-}
-
+/* a step's title is a section title (lq-section-title); setup.js moves the focus to it */
 .lq-setup-step__title:focus {
     outline: none;
 }
@@ -188,8 +182,8 @@
     display: flex;
     flex-wrap: wrap;
     align-items: center;
-    gap: 6px 10px;
-    padding: 12px 14px;
+    gap: var(--lq-space-2) var(--lq-space-3);
+    padding: var(--lq-space-3);
     border: 1px solid var(--lq-border);
     border-radius: var(--lq-radius-lg);
     background: var(--lq-surface-2);
@@ -235,8 +229,8 @@
     display: grid;
     grid-template-columns: auto minmax(0, 14em) minmax(0, 1fr);
     align-items: baseline;
-    gap: 4px 12px;
-    padding: 12px 0;
+    gap: var(--lq-space-1) var(--lq-space-3);
+    padding: var(--lq-space-3) 0;
     border-top: 1px solid var(--lq-border-soft);
 }
 
@@ -252,14 +246,10 @@
     font-weight: 500;
 }
 
+/* its colour is a shared text tone (lq-text--*: setup.js stateTone) */
 .lq-setup-check__state {
-    color: var(--lq-text-2);
     overflow-wrap: anywhere;
 }
-
-.lq-setup-check[data-tone="success"] .lq-setup-check__state { color: var(--lq-text-success); }
-.lq-setup-check[data-tone="danger"] .lq-setup-check__state { color: var(--lq-text-danger); }
-.lq-setup-check[data-tone="warning"] .lq-setup-check__state { color: var(--lq-text-warning); }
 
 .lq-setup-check__fix {
     grid-column: 2 / -1;
@@ -304,7 +294,7 @@
     display: flex;
     flex-direction: column;
     gap: var(--lq-space-2);
-    padding: 14px var(--lq-space-4);
+    padding: var(--lq-space-3) var(--lq-space-4);
     border: 1px solid var(--lq-border);
     border-radius: var(--lq-radius-lg);
     background: var(--lq-surface-2);
@@ -330,7 +320,7 @@
 
 .lq-setup-share__email {
     min-width: 0;
-    padding: 6px var(--lq-space-3);
+    padding: var(--lq-space-2) var(--lq-space-3);
     border: 1px solid var(--lq-border);
     border-radius: var(--lq-radius-sm);
     background: var(--lq-surface);
@@ -357,7 +347,7 @@
     flex-wrap: wrap;
     align-items: center;
     gap: var(--lq-space-3);
-    padding: 12px 14px;
+    padding: var(--lq-space-3);
     border: 1px solid var(--lq-border);
     border-radius: var(--lq-radius-lg);
     background: var(--lq-surface-2);
@@ -407,14 +397,14 @@
 @media (max-width: 980px) {
     .lq-setup-steps {
         grid-template-columns: repeat(5, minmax(0, 1fr));
-        gap: 6px;
+        gap: var(--lq-space-2);
     }
 
     .lq-setup-steps__link {
         flex-direction: column;
         align-items: center;
-        gap: 4px;
-        padding: 8px 4px;
+        gap: var(--lq-space-1);
+        padding: var(--lq-space-2) var(--lq-space-1);
         text-align: center;
     }
 

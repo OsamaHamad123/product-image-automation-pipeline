@@ -17,9 +17,10 @@
  *   server refuses it and only an explicit «replace», confirmed with the approved image shown, resends it;
  * - a reject with research never saves candidates from the page: the server saves them and puts the product back
  *   to review (contract C2), and the product stays listed in its chip;
- * - a reject without research works like an approval: it goes through the background queue (jobs.js), the next
- *   product opens at once, a failure stays in the approvals panel to be retried, and «تراجع» in its toast undoes it
- *   (undo-reject) without a question;
+ * - a reject (with or without research) works like an approval: it goes through the background queue (jobs.js), the
+ *   next product opens at once, a failure stays in the approvals panel to be retried, and «تراجع» in its toast undoes it
+ *   (undo-reject) without a question; with research, the answer (the new search) comes back later: when the server
+ *   saved alternatives the product returns to the list in its chip with «لقينا بدائل لـ …»;
  * - Enter while the selected picture is still loading (or just appeared) is kept for that product and picture and
  *   approves once the picture has been shown approveSettleMs, but only when the product itself has been open that
  *   long; any other reason Enter cannot approve is shown beside the approve button.
@@ -503,7 +504,9 @@
         const ctx = boundContext(item);
         const next = neighbour(item.key, 1, true);
         cancelPendingSearch();
-        if (!S.jobs.enqueue(buildJob(item, ctx, candidate), { holdMs: S.cfg.approveUndoMs })) return false;
+        const job = S.jobs.enqueue(buildJob(item, ctx, candidate), { holdMs: S.cfg.approveUndoMs });
+        if (!job) return false;
+        if (R.recordDecision) R.recordDecision(job.type === 'upload' ? 'upload' : 'approve', item, { job: job });
         S.local.set(item.key, 'approving');
         R.rebuild();
         R.patchList([item.key]);
@@ -679,13 +682,17 @@
             if (job.type === 'reject') {
                 // C2: رفض الصورة المقترحة وغيرها باقٍ يُبقي المنتج بانتظار المراجعة بصوره الباقية
                 const outcome = R.rejectionOutcome(data, !!job.alternative);
-                if (S.local.get(key) === 'rejecting') S.local.delete(key);
-                // اعتماد للمنتج نفسه انبعت بعد رفض صورة بديلة: ما بيتغطّى بـ«رجعت للطابور»
-                if (!['approved', 'approving'].includes(S.local.get(key)) && !outcome.kept) {
-                    if (outcome.requeued) S.local.set(key, 'rejected');
-                    else job.dropped = dropCandidate(key, job.candidate.url);
+                if (job.research) {
+                    researchSettled(job, data);
+                } else {
+                    if (S.local.get(key) === 'rejecting') S.local.delete(key);
+                    // اعتماد للمنتج نفسه انبعت بعد رفض صورة بديلة: ما بيتغطّى بـ«رجعت للطابور»
+                    if (!['approved', 'approving'].includes(S.local.get(key)) && !outcome.kept) {
+                        if (outcome.requeued) S.local.set(key, 'rejected');
+                        else job.dropped = dropCandidate(key, job.candidate.url);
+                    }
+                    if (job.localOnly) rejectedNote(job, outcome);
                 }
-                if (job.localOnly) rejectedNote(job, outcome);
             } else {
                 S.local.set(key, 'approved');
                 const rawLink = String(data.image_link || '');
@@ -741,8 +748,11 @@
                 R.toast(`${R.PRODUCT_CHANGED}: «${job.label}»`, 'danger', 9000);
             }
         }
+        if (R.decisionSettled) R.decisionSettled(job);
         R.rebuild();
-        R.patchList([key]);
+        // رفض مع بحث جديد: المنتج ممكن يرجع للرقاقة (S.keep)، فالقائمة كلها بتنرسم
+        if (job.research && job.state === 'done') R.renderList();
+        else R.patchList([key]);
         if (S.mode === 'single') {
             if (S.openKey === key) renderWorkspace();
             else updateBar();
@@ -752,7 +762,7 @@
         }
         // «تراجع» انضغط والرفض لسا ماشي: هلق انسجّل، فبينشال
         if (job.undo && job.type === 'reject') {
-            if (job.state === 'done') undoRejected(job);
+            if (job.state === 'done') undoRejected(job, { late: true });
             else if (S.jobs && typeof S.jobs.drop === 'function') S.jobs.drop(job.id);
         }
     }
@@ -848,25 +858,31 @@
     // جديد: settleJob بيحدّث المنتج بما قاله الخادم. «تراجع» بالإشعار بيشيل الرفض (undo-reject) بلا سؤال
     // صورة مش اختيار النظام وللمنتج صور تانية (stay): المراجع بيضل عالمنتج (غالباً بيعتمد المقترحة بعدها)، الصورة
     // بتختفي والعرض بينتقل للمقترحة أو للصورة الجاية. رفض المقترحة أو آخر صورة: منتقل للمنتج التالي
-    function rejectInBackground(item, candidate, ctx, reasonCode, query, alternative) {
+    // research («دوّر على بدائل»، الافتراضي): نفس الشي، والطلب بياخد لحد دقيقة بالخلفية (unslotted: ما بيوقّف الاعتمادات)؛
+    // جوابه بيرجّع المنتج للقائمة لما يلاقي بدائل (researchSettled)
+    function rejectInBackground(item, candidate, ctx, reasonCode, query, alternative, research) {
         const S = st();
         const sess = sessionOf(item.key);
         const sysUrl = systemPickUrl(item);
         const cands = currentCandidates(item).filter(c => !isExtra(c));
         const stay = candidate.url !== sysUrl && cands.some(c => c.url !== candidate.url);
         const next = stay ? null : neighbour(item.key, 1, true);
+        // الرفض مع البحث الجديد بحث كمان: بيلغي البحث الجاري، ونتيجته بتنعرض بس إذا ما بلّش بحث أحدث (searchToken)
+        if (research) cancelPendingSearch();
         const job = S.jobs.enqueue({ key: stay ? `${item.key}
 reject
 ${candidate.url}` : item.key, productKey: item.key, stay: stay,
                                      type: 'reject', label: productLabel(item), row: ctx.row_number, ctx: ctx,
                                      candidate: candidate, reason: reasonCode, alternative: alternative, localOnly: true,
-                                     body: R.rejectBody(ctx, candidate, reasonCode, false, query) });
+                                     research: !!research, unslotted: !!research, searchToken: S.searchSeq,
+                                     body: R.rejectBody(ctx, candidate, reasonCode, !!research, query) });
         if (!job) {
             renderWorkspace();
             return false;
         }
+        if (R.recordDecision) R.recordDecision('reject', item, { job: job, url: candidate.url, research: !!research });
         if (!stay) {
-            cancelPendingSearch();
+            if (!research) cancelPendingSearch();
             S.local.set(item.key, 'rejecting');
         }
         sess.rejected.add(candidate.url);
@@ -885,7 +901,7 @@ ${candidate.url}` : item.key, productKey: item.key, stay: stay,
             renderWorkspace();
             R.markActive();
         }
-        R.toast(`رفضت صورة «${job.label}» («${R.reasonLabel(reasonCode)}»).`, 'success', 8000,
+        R.toast(`رفضت صورة «${job.label}» («${R.reasonLabel(reasonCode)}»)${research ? '، وعم ندوّر على بدائل' : ''}.`, 'success', 8000,
                 { label: 'تراجع', onClick: () => undoBackgroundReject(job) });
         return true;
     }
@@ -920,8 +936,11 @@ ${candidate.url}` : item.key, productKey: item.key, stay: stay,
         else if (job.state === 'failed' && S.jobs && typeof S.jobs.drop === 'function') S.jobs.drop(job.id);
     }
 
-    async function undoRejected(job) {
+    // opts.late: «تراجع» انضغط والبحث الجديد لسا ماشي، والجواب وصل هلق (ممكن بعد دقيقة): المراجع بمنتج تاني، فما
+    // منقلب الشاشة عليه؛ القائمة بتتحدّث وإشعار بيقول إنه الصورة رجعت
+    async function undoRejected(job, opts) {
         const S = st();
+        const late = !!(opts && opts.late);
         const key = productKeyOf(job);
         const item = S.byKey.get(key);
         if (!item) return false;
@@ -938,7 +957,10 @@ ${candidate.url}` : item.key, productKey: item.key, stay: stay,
         if (S.local.get(key) === 'rejected') S.local.delete(key);
         sessionOf(key).note = '';
         R.rebuild();
-        if (S.mode === 'single') {
+        if (S.mode === 'single' && late && S.openKey !== key) {
+            R.renderList();
+            R.toast(`تراجعت عن رفض صورة «${now.product.product_name || `صف ${now.product.row_number}`}»: رجعت للاقتراحات.`, 'info');
+        } else if (S.mode === 'single') {
             R.renderList();
             openItem(key, { from: 'undo' });
         } else {
@@ -966,62 +988,60 @@ ${candidate.url}` : item.key, productKey: item.key, stay: stay,
         const alternative = !!sysUrl && candidate.url !== sysUrl;
         closeReasons(true);
         const query = (sess.customQuery !== null ? sess.customQuery : item.product.search_query) || '';
-        if (!research) {
-            rejectInBackground(item, candidate, ctx, reasonCode, query, alternative);
-            return;
-        }
-        // الرفض مع إعادة البحث بحث جديد: يلغي البحث الجاري ويحمل رمزاً
-        cancelPendingSearch();
-        const token = S.searchSeq;
-        sess.rejecting = { research: true };
-        renderWorkspace();
-        const res = await R.requestJson(S.urls.reject, { method: 'POST', body: R.rejectBody(ctx, candidate, reasonCode, true, query) });
-        sess.rejecting = false;
-        const data = res.data || {};
-        const recorded = !!data.rejection || (!!data.status && !['error', 'failed'].includes(String(data.status)));
-        if (!recorded) {
-            const msg = res.network ? 'ما قدرنا نوصل للخادم.' : R.plainError(data.error || data.message, 'ما انسجل الرفض.');
-            R.toast(`ما انرفضت الصورة: ${msg}`, 'danger', 9000);
-            if (String(data.error || '').indexOf(R.PRODUCT_CHANGED) >= 0) R.loadData({ quiet: true });
-            if (S.openKey === item.key) renderWorkspace();
-            return;
-        }
-        if (S.today) S.today.rejected += 1;
-        sess.rejected.add(candidate.url);
-        sess.rejectedWhy.set(candidate.url, reasonCode);
-        if (sess.pick === candidate.url) sess.pick = null;
-        R.settleSeen(item.key, data.current || null);
-        const flag = S.local.get(item.key);
-        const settled = flag === 'approving' || flag === 'approved' || (S.jobs && S.jobs.has(item.key));
+        rejectInBackground(item, candidate, ctx, reasonCode, query, alternative, research);
+    }
+
+    // الرفض مع بحث جديد انسجّل (jobs.js succeeded): الخادم بيرد نتيجة البحث نفسها (status مش دايماً «success»)
+    function jobSucceeded(job, res) {
+        const data = (res && res.data) || {};
+        if (!(job && job.type === 'reject' && job.research)) return !!(res && res.ok && data.status === 'success');
+        return !!res && !res.network && (!!data.rejection || (!!data.status && !['error', 'failed'].includes(String(data.status))));
+    }
+
+    // جواب الرفض مع بحث جديد وصل (والمراجع غالباً صار بمنتج ثاني): النتيجة بتنحفظ لمنتجها، وإذا الخادم حفظ بدائل والمنتج
+    // رجع بانتظار المراجعة، بيرجع للقائمة بنفس الرقاقة (S.keep) مع جملة مؤدبة «لقينا بدائل لـ …». اعتماد للمنتج نفسه
+    // انبعت بالنص (approving / approved): النتيجة بتنرمى متل قبل
+    function researchSettled(job, data) {
+        const S = st();
+        const key = productKeyOf(job);
+        const item = S.byKey.get(key);
+        const url = job.candidate.url;
+        const sess = sessionOf(key);
+        if (S.local.get(key) === 'rejecting') S.local.delete(key);
+        sess.rejected.add(url);
+        sess.rejectedWhy.set(url, job.reason);
+        if (sess.pick === url) sess.pick = null;
+        if (!item) return;
+        const flag = S.local.get(key);
+        const settled = flag === 'approving' || flag === 'approved' || (S.jobs && S.jobs.has(key));
         // C2: ما قاله الخادم عن الطابور (rejection.queue_status) والصور الباقية (candidates_left)
-        const outcome = R.rejectionOutcome(data, alternative);
+        const outcome = R.rejectionOutcome(data, !!job.alternative);
         const left = outcome.left ? ` (${outcome.left})` : '';
         const saved = savedCount(data);
         let message = outcome.kept ? 'انرفضت الصورة. الصورة المعتمدة قبل بتضل زي ما هي.' : 'انرفضت الصورة وسجّلنا السبب. المنتج رجع للطابور.';
+        let tone = 'success';
         if (!settled) {
-            const note = `رفضتها («${R.reasonLabel(reasonCode)}») وسجّلنا السبب، وهاي نتيجة بحث جديد بدونها.`;
+            const note = `رفضتها («${R.reasonLabel(job.reason)}») وسجّلنا السبب، وهاي نتيجة بحث جديد بدونها.`;
             // فُتح منتج آخر أو بدأ بحث أحدث: النتيجة تُحفظ لمنتجها ولا يتغير ما يعرضه المراجع
-            const current = token === S.searchSeq && isOpen(ctx);
-            applySearchResponse(item.key, res, Object.assign({}, ctx), note, current);
+            const current = job.searchToken === S.searchSeq && isOpen(job.ctx);
+            applySearchResponse(key, job.result, Object.assign({}, job.ctx), note, current);
             if (outcome.kept) {
                 // الاعتماد السابق باقٍ (approval_kept) والطابور لم يتغيّر: لا «بانتظار مراجعتك»
                 message = 'انرفضت الصورة وسجّلنا السبب. الصورة المعتمدة قبل بتضل زي ما هي.';
             } else if (saved && outcome.queueStatus === 'ready_for_review') {
                 // الخادم حفظ المرشحين الجدد والمنتج بانتظار المراجعة: لا حفظ من الصفحة، ولا «رجع للطابور»
-                requeueForReview(item, data, candidate.url);
-                message = 'انرفضت الصورة وسجّلنا السبب. نتيجة البحث الجديد محفوظة والمنتج بانتظار مراجعتك.';
+                requeueForReview(item, data, url);
+                message = `لقينا بدائل لـ «${job.label}»، ورجع بانتظار مراجعتك.`;
+                tone = 'info';
             } else if (outcome.requeued) {
-                S.local.set(item.key, 'rejected');
+                S.local.set(key, 'rejected');
             } else {
-                dropCandidate(item.key, candidate.url);
+                job.dropped = dropCandidate(key, url);
                 message = `انرفضت الصورة وسجّلنا السبب. باقي الصور ما زالت للمراجعة${left}.`;
             }
         }
-        R.toast(message, 'success');
-        R.rebuild();
-        R.renderList();
-        if (S.openKey === item.key) renderWorkspace();
-        R.markActive();
+        // «تراجع» انضغط والطلب ماشي: ما في داعي نحكي عن نتيجة رفض رح ينشال
+        if (!job.undo) R.toast(message, tone);
         // الخادم هو المرجع: قراءة هادئة تأتي بما حفظه فعلاً (المرشحون وحالة الطابور)
         if (!settled) R.loadData({ quiet: true });
     }
@@ -1045,6 +1065,7 @@ ${candidate.url}` : item.key, productKey: item.key, stay: stay,
             sess.rejected.delete(url);
             sess.rejectedWhy.delete(url);
             R.forgetRejection(item.product, url);
+            if (R.rejectUndone) R.rejectUndone(item.key, url);
             R.toast(done ? (data.still_rejected ? 'انشال رفض واحد، بس الصورة مرفوضة مرة ثانية لهالمنتج.'
                                                 : 'رجعت الصورة للاقتراحات. «دوّر مرة ثانية» بيقدر يلاقيها.')
                          : 'ما في رفض مسجل لهالصورة.', done ? 'success' : 'info');
@@ -1081,6 +1102,7 @@ ${candidate.url}` : item.key, productKey: item.key, stay: stay,
     function skip() {
         const item = currentItem();
         const next = item ? neighbour(item.key, 1, true) : (R.visibleItems()[0] || null);
+        if (item && next && R.recordDecision) R.recordDecision('skip', item);
         if (next) openItem(next.key, { from: 'skip' });
     }
 
@@ -1780,10 +1802,12 @@ ${candidate.url}` : item.key, productKey: item.key, stay: stay,
             updateBar();
             return;
         }
-        if (sess.rejecting) {
+        // رجع لمنتج رفضه مع بحث جديد والجواب لسا ما وصل (rejectInBackground research)
+        const researching = S.local.get(item.key) === 'rejecting' && S.jobs ? S.jobs.activeFor(item.key) : null;
+        if (researching && researching.research) {
             S.ws.state = 'rejecting';
-            body.appendChild(waitingView(sess.rejecting.research ? 'جاري تسجيل الرفض والبحث عن بدائل…' : 'جاري تسجيل الرفض…',
-                                         sess.rejecting.research ? 'البحث بياخد عادة بين 15 و60 ثانية. بتقدر تنتقل لمنتج ثاني وترجع.' : ''));
+            body.appendChild(waitingView('جاري تسجيل الرفض والبحث عن بدائل…',
+                                         'البحث بياخد عادة بين 15 و60 ثانية. كمّل شغلك، والمنتج بيرجع لقائمتك لما نلاقي بدائل.'));
             updateBar();
             return;
         }
@@ -1995,7 +2019,7 @@ ${candidate.url}` : item.key, productKey: item.key, stay: stay,
         sessionOf, currentItem, currentCandidates, currentPick, systemPickUrl, boundContext, openItem, startSearch, reopen,
         resetMoved, approveBlock, approveState, enterWhileBlocked, flashApproveNote, jobRetried, undoBackgroundReject,
         cancelPendingSearch, applySearchResponse, canApprove, canReject, selectByNumber, approveCurrent, sendJob,
-        settleJob, confirmReplace, confirmPublishAnyway, confirmBgSkip, undoReject, rejectedPanel, openReasons, closeReasons, currentReasons, rejectCurrent, skip, move, toggleNotFound,
+        settleJob, jobSucceeded, undoRejected, confirmReplace, confirmPublishAnyway, confirmBgSkip, undoReject, rejectedPanel, openReasons, closeReasons, currentReasons, rejectCurrent, skip, move, toggleNotFound,
         previewUrl, chooseFile, retryFailures, renderWorkspace, updateBar, updateJobsOffset, isOpen, updatePosition,
         openLightbox, jobBodySize, preloadAround
     };

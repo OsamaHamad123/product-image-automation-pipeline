@@ -691,11 +691,13 @@ R.setMode('bulk');
 await flush();                                       // its card is on screen and its picture loaded: approvable
 R.bulk.approveOne(itemOf(9).key);                    // approve B's system pick from bulk mode meanwhile
 await flush();
-answer(requests('/api/select_image')[0], __OK__);
-await flush();
+// the approval waits for the reject of the same product (jobs.js conflictKey); the reject's answer comes first
+out.queued = requests('/api/select_image').length;
 answer(requests('/api/reject_image')[0], { status: 'review', decision: 'REVIEW_UNSELECTED', sku_key: __SKU__,
     candidates: [{ url: 'https://www.lulu.com/b7.jpg', status: 'eligible', title: 'new' }],
     rejection: { approval_kept: false } });
+await flush();
+answer(requests('/api/select_image')[0], __OK__);
 await flush();
 out.saved = requests('/api/v1/curation/save-candidates').length;
 R.setMode('single', { key: itemOf(9).key });
@@ -707,6 +709,7 @@ press('1'); press('Enter');
 await flush();
 out.approvals = requests('/api/select_image').length;
 """.replace("__OK__", js(OK)).replace("__SKU__", js(B["sku_key"])), tmp_path)
+    assert out["queued"] == 0
     assert out["saved"] == 0
     assert APPROVED in out["text"] and out["alts"] == [] and out["approve_disabled"] is True
     assert out["approvals"] == 1

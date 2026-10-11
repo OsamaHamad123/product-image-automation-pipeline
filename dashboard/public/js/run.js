@@ -458,6 +458,8 @@
     var BULK_NO_EVIDENCE = 'ما لقينا دليل كافي';
     var BULK_CONFIDENCE_TEXT = { high: 'دليل قوي', low: 'دليل ضعيف', none: 'ما في دليل' };
     var BULK_CONFIDENCE_TONE = { high: 'approved', low: 'warning', none: 'none' };
+    // the strength chip's colour (the shared chip tones): strong evidence is green, weak is a warning
+    var BULK_CHIP_TONE = { high: 'success', low: 'warning', none: 'neutral' };
     var BULK_SITES_CONFIRM_TEXT = 'دوّر عالمواقع الرسمية:\n' +
         '• منبحث عن الموقع الرسمي لكل ماركة ما دوّرنا على موقعها قبل، بحث واحد لكل ماركة، ولحد 10 بحث بالمرة.\n' +
         '• كل بحث بينحسب متل أي بحث، والنتيجة بتنحفظ فما منعيده.\n' +
@@ -1033,7 +1035,7 @@
                 group.setAttribute('data-issue', g.key);
                 var summary = C.el(doc, 'summary', 'lq-run-quality__summary');
                 summary.appendChild(C.el(doc, 'span', 'lq-run-quality__label', g.label));
-                summary.appendChild(C.el(doc, 'span', 'lq-run-quality__count lq-num', String(g.count)));
+                summary.appendChild(C.el(doc, 'span', 'lq-chip lq-chip--warning lq-chip--sm lq-num lq-run-quality__count', String(g.count)));
                 group.appendChild(summary);
                 if (g.brands.length) {
                     group.appendChild(C.el(doc, 'p', 'lq-run-quality__brands', 'الماركات: ' + g.brands.map(function (b) {
@@ -1209,7 +1211,7 @@
             var name = C.el(doc, 'bdi', 'lq-run-brand__name', b.brand);
             name.setAttribute('dir', 'auto');
             head.appendChild(name);
-            head.appendChild(C.el(doc, 'span', 'lq-run-brand__rows lq-num', b.rowsText));
+            head.appendChild(C.el(doc, 'span', 'lq-chip lq-chip--warning lq-chip--sm lq-num lq-run-brand__rows', b.rowsText));
             el.appendChild(head);
 
             var synField = C.el(doc, 'label', 'lq-field');
@@ -1316,7 +1318,8 @@
             var name = C.el(doc, 'bdi', 'lq-run-barcode__name', r.brand);
             name.setAttribute('dir', 'auto');
             head.appendChild(name);
-            var chip = C.el(doc, 'span', 'lq-run-bulk__chip lq-run-bulk__chip--' + r.confidence, r.confidenceText);
+            var chip = C.el(doc, 'span', 'lq-chip lq-chip--sm lq-chip--' + (BULK_CHIP_TONE[r.confidence] || 'neutral') + ' lq-run-bulk__chip',
+                r.confidenceText);
             head.appendChild(chip);
             body.appendChild(head);
             var meta = C.el(doc, 'span', 'lq-run-barcode__meta');
@@ -1393,7 +1396,7 @@
             var box = $('bulk-added');
             C.clear(box);
             added.forEach(function (brand) {
-                var line = C.el(doc, 'div', 'lq-run-bulk__added');
+                var line = C.el(doc, 'div', 'lq-chip lq-chip--teal lq-run-bulk__added');
                 var name = C.el(doc, 'bdi', 'lq-run-bulk__added-name', brand);
                 name.setAttribute('dir', 'auto');
                 line.appendChild(name);

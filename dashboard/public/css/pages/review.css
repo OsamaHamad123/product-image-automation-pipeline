@@ -3173,3 +3173,127 @@ body.rv-lb-open {
 .rv-card__overlay.is-held.is-reject {
     color: var(--lq-danger-text);
 }
+
+/* -------------------------------------------------------------------------------------------------
+ * «آخر قراراتك» (app.js renderHistory): this session's last decisions under the list, in the queue column; on a
+ * phone it folds away with the list inside «القائمة (N)». Tokens only (dark mode follows them).
+ * Appended block: kept together at the end of the file to ease merging.
+ * ------------------------------------------------------------------------------------------------- */
+
+.rv-history {
+    flex-shrink: 0;
+    border-block-start: 1px solid var(--lq-border);
+    background: var(--lq-surface);
+}
+
+.rv-history[hidden],
+.rv-history__list[hidden] {
+    display: none;
+}
+
+.lq-body .rv-history__toggle,
+.rv-history__toggle {
+    display: flex;
+    align-items: center;
+    gap: var(--lq-space-2);
+    width: 100%;
+    min-height: 44px;
+    padding: 0 18px;
+    border: 0;
+    background: transparent;
+    color: var(--lq-text);
+    font: inherit;
+    font-size: var(--lq-fs-sm);
+    font-weight: 600;
+    text-align: start;
+    cursor: pointer;
+}
+
+.rv-history__toggle:focus-visible {
+    outline: 2px solid var(--lq-accent);
+    outline-offset: -2px;
+}
+
+.rv-history__count {
+    color: var(--lq-text-2);
+    font-weight: 400;
+}
+
+.rv-history__icon {
+    margin-inline-start: auto;
+    transition: transform 0.15s ease;
+}
+
+.rv-history__toggle[aria-expanded="true"] .rv-history__icon {
+    transform: rotate(180deg);
+}
+
+.rv-history__list {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    max-height: 260px;
+    margin: 0;
+    padding: 0 8px 8px;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    list-style: none;
+}
+
+.rv-history__item {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 4px var(--lq-space-2);
+    padding: 6px 10px;
+    border-radius: var(--lq-radius-sm);
+    font-size: var(--lq-fs-xs);
+}
+
+.rv-history__item:hover {
+    background: var(--lq-surface-2);
+}
+
+.rv-history__text {
+    flex: 1 1 160px;
+    min-width: 0;
+    color: var(--lq-text);
+}
+
+.rv-history__name {
+    font-weight: 600;
+}
+
+.rv-history__meta {
+    color: var(--lq-text-2);
+}
+
+.rv-history__item.is-undone .rv-history__text {
+    color: var(--lq-text-2);
+}
+
+.rv-history__item.is-failed .rv-history__meta {
+    color: var(--lq-danger-text);
+}
+
+.rv-history__actions {
+    display: inline-flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.lq-body .rv-history__btn {
+    min-height: 28px;
+    padding: 0 8px;
+}
+
+@media (max-width: 980px) {
+    .lq-body .rv-history__toggle {
+        min-height: 48px;
+        padding: 0 var(--lq-space-4);
+    }
+
+    .lq-body .rv-history__btn {
+        min-height: 44px;
+    }
+}

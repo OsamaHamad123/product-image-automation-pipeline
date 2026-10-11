@@ -25,7 +25,7 @@
     display: flex;
     flex-direction: column;
     align-items: flex-end;
-    gap: 6px;
+    gap: var(--lq-space-2);
 }
 
 .lq-health__check .lq-btn[aria-busy="true"] .lq-icon {
@@ -47,19 +47,13 @@
 .lq-health__services {
     display: grid;
     grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 14px;
+    gap: var(--lq-space-4);
 }
 
+/* a service tile is a flat compact card (lq-card lq-card--flat lq-card--compact): its surface, edge and padding are
+   the card's; a service that fails or warns tints the edge */
 .lq-health-service {
-    display: flex;
-    flex-direction: column;
     gap: var(--lq-space-2);
-    min-width: 0;
-    padding: var(--lq-space-4);
-    border: 1px solid var(--lq-border);
-    border-radius: var(--lq-radius-xl);
-    background: var(--lq-surface);
-    box-shadow: var(--lq-shadow-card);
 }
 
 .lq-health-service[data-tone="danger"] {
@@ -77,23 +71,15 @@
     gap: var(--lq-space-2);
 }
 
-.lq-body .lq-health-service__name,
+/* the name is the card title (lq-card__title); a long provider name wraps */
 .lq-health-service__name {
-    margin: 0;
-    font-size: var(--lq-fs-base);
-    font-weight: 600;
     overflow-wrap: anywhere;
 }
 
+/* the state is a chip (lq-chip lq-chip--sm lq-chip--<tone>, health.js CHIPS) sized to its text */
 .lq-health-service__state {
-    font-size: var(--lq-fs-xs);
-    font-weight: 500;
-    color: var(--lq-text-2);
+    align-self: flex-start;
 }
-
-.lq-health-service[data-tone="success"] .lq-health-service__state { color: var(--lq-text-success); }
-.lq-health-service[data-tone="danger"] .lq-health-service__state { color: var(--lq-text-danger); }
-.lq-health-service[data-tone="warning"] .lq-health-service__state { color: var(--lq-text-warning); }
 
 .lq-health-service__note {
     font-size: var(--lq-fs-xs);
@@ -114,7 +100,7 @@
 }
 
 .lq-health-service__details p {
-    margin-block-start: 6px;
+    margin-block-start: var(--lq-space-2);
     max-height: 160px;
     overflow: auto;
     white-space: pre-wrap;
@@ -139,7 +125,7 @@
 .lq-health__optional-item {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--lq-space-2);
 }
 
 /* «فحص النشر»: the publish rehearsal, one row per step */
@@ -167,7 +153,7 @@
 .lq-health-publish__intro {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: var(--lq-space-2);
     min-width: 0;
     max-width: var(--lq-measure);
 }
@@ -182,7 +168,7 @@
     display: flex;
     flex-direction: column;
     align-items: flex-end;
-    gap: 6px;
+    gap: var(--lq-space-2);
 }
 
 .lq-health-publish__cost {
@@ -203,7 +189,7 @@
 }
 
 .lq-health-publish__summary .lq-dot {
-    margin-block-start: 6px;
+    margin-block-start: var(--lq-space-2);
     flex-shrink: 0;
 }
 
@@ -271,7 +257,7 @@
     display: flex;
     align-items: flex-start;
     gap: var(--lq-space-3);
-    padding-block: 10px;
+    padding-block: var(--lq-space-2);
     border-block-start: 1px solid var(--lq-border-soft);
 }
 
@@ -306,7 +292,7 @@
 .lq-health-step__body {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: var(--lq-space-1);
     min-width: 0;
     flex-grow: 1;
 }
@@ -427,13 +413,13 @@
 }
 
 .lq-health-results {
-    gap: 14px;
+    gap: var(--lq-space-4);
 }
 
 .lq-health-results__rows {
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: var(--lq-space-4);
 }
 
 .lq-health-result {
@@ -478,13 +464,6 @@
     border-block-start: 1px solid var(--lq-border-soft);
 }
 
-.lq-body .lq-health-providers__title,
-.lq-health-providers__title {
-    margin: 0;
-    font-size: var(--lq-fs-base);
-    font-weight: 600;
-}
-
 .lq-health-providers__rows {
     display: flex;
     flex-direction: column;
@@ -504,16 +483,10 @@
     overflow-wrap: anywhere;
 }
 
-.lq-health-provider__ok { color: var(--lq-text-success); }
-.lq-health-provider__empty { color: var(--lq-text-muted); }
-.lq-health-provider__problems { color: var(--lq-text-muted); }
-.lq-health-provider__problems--danger { color: var(--lq-text-danger); }
-.lq-health-provider__problems--warning { color: var(--lq-text-warning); }
-
 /* Cost */
 .lq-health-cost,
 .lq-health-reasons {
-    gap: 10px;
+    gap: var(--lq-space-3);
 }
 
 .lq-health-cost__total {
@@ -526,7 +499,7 @@
 .lq-health-cost__lines {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: var(--lq-space-2);
     font-size: var(--lq-fs-xs);
     color: var(--lq-text-2);
 }
@@ -558,7 +531,7 @@
     display: flex;
     justify-content: space-between;
     gap: var(--lq-space-3);
-    padding-block: 6px;
+    padding-block: var(--lq-space-2);
     border-block-start: 1px solid var(--lq-border-soft);
     font-size: var(--lq-fs-xs);
 }
@@ -607,7 +580,12 @@
 
 /* Log */
 .lq-health-log {
-    gap: 10px;
+    gap: var(--lq-space-3);
+}
+
+/* the section title on the dark card */
+.lq-health-log .lq-section-title {
+    color: var(--lq-text-on-dark);
 }
 
 .lq-health-log__head {
@@ -620,12 +598,12 @@
 
 .lq-health-log__tabs {
     display: inline-flex;
-    gap: 6px;
+    gap: var(--lq-space-2);
 }
 
 .lq-body .lq-health-log__tab,
 .lq-health-log__tab {
-    padding: var(--lq-space-1) 10px;
+    padding: var(--lq-space-1) var(--lq-space-2);
     border: 0;
     border-radius: var(--lq-radius-sm);
     background: transparent;
@@ -689,7 +667,7 @@
 .lq-health-now__head {
     display: flex;
     align-items: center;
-    gap: 14px;
+    gap: var(--lq-space-4);
 }
 
 .lq-health-now__icon {
@@ -721,13 +699,6 @@
     min-width: 0;
 }
 
-.lq-health .lq-health-now__title {
-    margin: 0;
-    font-family: var(--lq-font-display);
-    font-size: var(--lq-fs-xl);
-    font-weight: 600;
-}
-
 .lq-health-now__lead {
     max-width: var(--lq-measure);
     margin: 0;
@@ -751,8 +722,8 @@
     display: grid;
     grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
-    gap: 6px 12px;
-    padding: 12px 0;
+    gap: var(--lq-space-2) var(--lq-space-3);
+    padding: var(--lq-space-3) 0;
     border-top: 1px solid var(--lq-border-soft);
 }
 
@@ -855,7 +826,7 @@
     display: flex;
     flex-wrap: wrap;
     align-items: baseline;
-    gap: 10px;
+    gap: var(--lq-space-3);
 }
 
 .lq-health-lane__label {
@@ -896,11 +867,7 @@
 
 @media (max-width: 560px) {
     .lq-health__services {
-        gap: 10px;
-    }
-
-    .lq-health-service {
-        padding: var(--lq-space-3);
+        gap: var(--lq-space-3);
     }
 
     .lq-health__check,
@@ -925,7 +892,7 @@
 
     .lq-health-result {
         grid-template-columns: 88px minmax(0, 1fr) 32px;
-        gap: 10px;
+        gap: var(--lq-space-3);
     }
 
     .lq-health-provider {

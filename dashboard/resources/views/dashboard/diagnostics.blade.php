@@ -23,6 +23,8 @@
 @php
     $healthDots = ['success' => 'lq-dot--success', 'danger' => 'lq-dot--danger', 'warning' => 'lq-dot--warning', 'info' => 'lq-dot--info', 'muted' => 'lq-dot--muted'];
     $nowIcons = ['ok' => 'check', 'attention' => 'alert', 'checking' => 'refresh'];
+    // a service's state is a chip of the shared tones (health.js CHIPS: the same map)
+    $healthChips = ['success' => 'success', 'danger' => 'danger', 'warning' => 'warning', 'info' => 'info', 'muted' => 'neutral'];
     // the card's heading is what the service does; the provider's name stays beside it, muted
     $serviceRoles = ['google_sheets' => 'شيت المنتجات', 'serper' => 'البحث عن الصور', 'gemini' => 'قارئ الملصق',
         'photoroom' => 'عزل الخلفية', 'cloudinary' => 'رفع الصور'];
@@ -35,7 +37,7 @@
             <div class="lq-health-now__head" role="status" aria-live="polite">
                 <span class="lq-health-now__icon" aria-hidden="true"><x-lq.icon :name="$nowIcons[$attention['state']] ?? 'info'" :size="22" :stroke="2.2" /></span>
                 <div class="lq-health-now__text">
-                    <h2 class="lq-health-now__title" id="lq-health-now-title" data-health="now-title">{{ $attention['title'] }}</h2>
+                    <h2 class="lq-section-title" id="lq-health-now-title" data-health="now-title">{{ $attention['title'] }}</h2>
                     <p class="lq-health-now__lead" data-health="now-text">{{ $attention['text'] }}</p>
                 </div>
             </div>
@@ -76,12 +78,12 @@
 
         <div class="lq-health__services" data-health="services" aria-live="polite">
             @foreach ($services as $service)
-                <article class="lq-health-service" id="card-{{ $service['key'] }}" data-service="{{ $service['key'] }}" data-tone="{{ $service['tone'] }}">
+                <article class="lq-card lq-card--flat lq-card--compact lq-health-service" id="card-{{ $service['key'] }}" data-service="{{ $service['key'] }}" data-tone="{{ $service['tone'] }}">
                     <div class="lq-health-service__head">
-                        <h2 class="lq-health-service__name">{{ $serviceRoles[$service['key']] ?? $service['name'] }} @isset($serviceRoles[$service['key']])<span class="lq-subtle" dir="ltr">{{ $service['name'] }}</span>@endisset</h2>
+                        <h2 class="lq-card__title lq-health-service__name">{{ $serviceRoles[$service['key']] ?? $service['name'] }} @isset($serviceRoles[$service['key']])<span class="lq-subtle" dir="ltr">{{ $service['name'] }}</span>@endisset</h2>
                         <span class="lq-dot lq-dot--lg {{ $healthDots[$service['tone']] ?? 'lq-dot--muted' }}" data-service-dot aria-hidden="true"></span>
                     </div>
-                    <span class="lq-health-service__state" data-service-state>{{ $service['state'] }}</span>
+                    <x-lq.chip :tone="$healthChips[$service['tone']] ?? 'neutral'" size="sm" :dot="false" class="lq-health-service__state" data-service-state>{{ $service['state'] }}</x-lq.chip>
                     <span class="lq-health-service__note" data-service-note>{{ $service['note'] }}</span>
                     <details class="lq-health-service__details" data-service-details @if ($service['details'] === '') hidden @endif>
                         <summary>التفاصيل</summary>
@@ -137,7 +139,7 @@
                         @endfor
                     </div>
                     <div class="lq-health-providers">
-                        <h4 class="lq-health-providers__title">ردود المصادر</h4>
+                        <h4 class="lq-card__title">ردود المصادر</h4>
                         <div class="lq-health-providers__rows" data-health="providers">
                             <span class="lq-skeleton lq-skeleton--short" aria-hidden="true"></span>
                         </div>
@@ -179,7 +181,7 @@
     @case('logs')
         <section class="lq-card lq-card--dark lq-health-log" id="logs" aria-labelledby="lq-health-log-title">
             <div class="lq-health-log__head">
-                <h2 class="lq-card__title" id="lq-health-log-title">السجل</h2>
+                <h2 class="lq-section-title" id="lq-health-log-title">السجل</h2>
                 <div class="lq-health-log__tabs" role="tablist" aria-label="نوع السجل">
                     <button type="button" role="tab" class="lq-health-log__tab" id="tab-pipeline" data-log-tab="pipeline" aria-selected="true" aria-controls="lq-health-log-body">الأتمتة</button>
                     <button type="button" role="tab" class="lq-health-log__tab" id="tab-laravel" data-log-tab="laravel" aria-selected="false" aria-controls="lq-health-log-body" tabindex="-1">لوحة التحكم</button>
@@ -201,7 +203,7 @@
         <section class="lq-card lq-health-publish" id="publish-check" aria-labelledby="publish-check-title" data-health="publish" data-tone="{{ $publish['tone'] }}">
             <div class="lq-health-publish__head">
                 <div class="lq-health-publish__intro">
-                    <h2 class="lq-card__title" id="publish-check-title">فحص النشر</h2>
+                    <h2 class="lq-section-title" id="publish-check-title">فحص النشر</h2>
                     <p class="lq-health-publish__desc">بيجرّب النشر كامل على صورة تجريبية بدون ما يلمس منتجاتك: التنزيل، عزل الخلفية، الرفع، والكتابة بالشيت.</p>
                 </div>
                 <div class="lq-health-publish__action">
@@ -260,7 +262,7 @@
              background refresh through the bridge and returns at once; the status line shows the progress on reload. --}}
         <section class="lq-card" id="local-index" aria-label="فهرس المتاجر المحلي" data-health="index-card">
             <div class="lq-card__header">
-                <h2 class="lq-card__title">فهرس المتاجر المحلي</h2>
+                <h2 class="lq-section-title">فهرس المتاجر المحلي</h2>
                 <span class="lq-card__meta">{{ $localIndex['total_text'] }}</span>
             </div>
             <p class="lq-card__meta">بيدوّر على صفحات المنتجات من خرايط المتاجر نفسها بمجاني، قبل أي بحث مدفوع. بيتحدّث لحاله بالخلفية أول التشغيل إذا صار أقدم من أسبوع.</p>
@@ -289,7 +291,7 @@
         {{-- «صدّر مجموعة اختبار» (HealthController::exportEvalSet -> cli_bridge eval_export -> scripts/eval_record.py
              --from-db). الزر وحده يشغّله؛ بيرجع وين الملف ورابط تنزيله (health.js createEvalExport). --}}
         <section class="lq-card lq-health-eval" id="eval-export" aria-labelledby="lq-health-eval-title" data-health="eval-card" data-lq-admin>
-                <h2 class="lq-card__title" id="lq-health-eval-title">مجموعة اختبار من مراجعاتك</h2>
+                <h2 class="lq-section-title" id="lq-health-eval-title">مجموعة اختبار من مراجعاتك</h2>
                 <p class="lq-card__meta">ملف واحد من مراجعاتك بتبعته للفريق ليقيسوا دقة البحث؛ ما بيكلّف شي وما فيه أي مفتاح.</p>
                 <details><summary class="lq-link">تفاصيل</summary><p class="lq-field__hint">بتجمع المنتجات اللي راجعتها (اللي اعتمدتها واللي رفضتها) مع الصور اللي عرضها البحث، بنسخ صغيرة، ليقيسوا دقة البحث على منتجاتك الحقيقية. ما بتعمل أي بحث، وما بيطلع فيها أي مفتاح أو بيانات دخول.</p></details>
                 <div class="lq-card__header">
@@ -308,7 +310,7 @@
         {{-- «صور قديمة بخلفية بيضا» (RecutController -> cli_bridge reprocess_plan / reprocess_start ->
              scripts/reprocess_transparent.py; health.js createReprocess). «احسب» ما بيغيّر شي؛ «ابدأ» دفعة بسقف. --}}
         <section class="lq-card lq-health-reprocess" id="reprocess" aria-labelledby="reprocess-title" data-health="reprocess" data-lq-admin>
-            <h2 class="lq-card__title" id="reprocess-title">صور قديمة بخلفية بيضا</h2>
+            <h2 class="lq-section-title" id="reprocess-title">صور قديمة بخلفية بيضا</h2>
             <p class="lq-card__meta">«احسب» بيقلك قديش بتكلّف نعيد قص الصور القديمة شفافة، بدون ما يغيّر شي.</p>
             <details><summary class="lq-link">تفاصيل</summary><p class="lq-field__hint">الصور اللي انتشرت قبل الخلفية الشفافة بتبين مربع أبيض بالوضع الغامق بالتطبيق. الصف اللي غيّرت صورته بإيدك ما منلمسه، وكل صورة بتنعاد بتنسجّل وفيك ترجّعها من «فحص القص».</p></details>
             <div class="lq-card__header">

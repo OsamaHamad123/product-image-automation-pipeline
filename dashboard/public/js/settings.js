@@ -295,7 +295,7 @@
 
         var showStatus = function (text, tone, detail) {
             status.textContent = text || '';
-            status.className = 'lq-settings-form__status' + (tone ? ' lq-settings-form__status--' + tone : '');
+            status.className = 'lq-settings-form__status lq-text--' + (tone || 'muted');
             status.title = detail || '';
         };
 
@@ -311,9 +311,11 @@
             clear(head);
             clear(rows);
             view.columns.forEach(function (c) {
-                var li = make('li', 'lq-settings-columns__item lq-settings-columns__item--' + c.tone);
+                var li = make('li', 'lq-settings-columns__item');
+                li.setAttribute('data-tone', c.tone);
                 li.appendChild(make('span', 'lq-settings-columns__label', c.label));
-                li.appendChild(make('span', 'lq-settings-columns__value', c.text));
+                // a found / added / missing column says so in its tone; a column that is just absent stays quiet
+                li.appendChild(make('span', 'lq-settings-columns__value' + (c.tone === 'muted' ? ' lq-subtle' : ' lq-text--' + c.tone), c.text));
                 columns.appendChild(li);
             });
             view.headers.forEach(function (h, i) {
@@ -478,7 +480,7 @@
         if (!entry.badge && dirty) {
             var titleEl = titleElOf(form);
             if (titleEl && titleEl.appendChild) {
-                entry.badge = make('span', 'lq-settings-dirty', 'ما انحفظ');
+                entry.badge = make('span', 'lq-chip lq-chip--warning lq-chip--sm lq-settings-dirty', 'ما انحفظ');
                 entry.badge.setAttribute('data-settings-dirty', '');
                 titleEl.appendChild(entry.badge);
             }
