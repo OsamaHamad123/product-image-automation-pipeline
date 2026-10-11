@@ -150,7 +150,7 @@ $out['groups'] = [array_keys(S::groups(false)), array_keys(S::groups(true))];
 $out['url'] = [S::url('keys'), S::url('setup', ['step' => 'keys']), S::url('publish', [], 'publish-check')];
 $out['goto'] = array_map(fn ($g) => S::gotoHref($g), ['services', 'publish-check', 'bg-restore', 'index-card', 'log-nightly', 'reload']);
 $out['adminHref'] = array_map(fn ($h) => S::adminHref($h), ['/system?tab=keys#lq-key-serper', '/system?tab=logs&goto=log-nightly#logs',
-    '/system?tab=publish', '/batch-automation#run-new', '/catalog?filter=failed', '/system']);
+    '/system?tab=publish', '/batch-automation#run-new', '/catalog?filter=failed', '/system', '/#run-new', '/#run-brands', '/']);
 """)
     assert out["admin"] == ["keys", "setup", "recut", "status", "status", "status", "status"]
     assert out["reviewer"] == ["status", "status", "status", "status", "logs", "search"]
@@ -161,7 +161,7 @@ $out['adminHref'] = array_map(fn ($h) => S::adminHref($h), ['/system?tab=keys#lq
                            "/system?tab=publish&goto=bg-restore#publish-check",
                            "/system?tab=index&goto=index-card#local-index",
                            "/system?tab=logs&goto=log-nightly#logs", ""]
-    assert out["adminHref"] == [True, False, True, True, False, False]
+    assert out["adminHref"] == [True, False, True, True, False, False, True, True, False]   # «اليوم» run panel and tools: owner only
 
 
 @NEEDS_LARAVEL
