@@ -93,7 +93,7 @@ def test_models_tab_renders_and_saves_only_supported_choices(app_env):
     prices_out = {k: "10" for k in prices_in}
     env = app_env["env"]
     out = _kernel(env, [
-        ["GET", "/settings?tab=models", {}],
+        ["GET", "/system?tab=models", {}],
         ["POST", "/settings", {"section": "models", "verifier_primary": "gemini:gemini-3.5-flash",
                                "verifier_strong": "claude:claude-sonnet-5-5", "verifier_monthly_budget_usd": "7.5",
                                "price_input": prices_in, "price_output": prices_out}],
@@ -128,8 +128,8 @@ def test_models_tab_renders_and_saves_only_supported_choices(app_env):
         ["POST", "/settings", {"section": "models", "verifier_primary": "claude:claude-haiku-4-5",
                                "verifier_strong": "off", "verifier_monthly_budget_usd": "0"}],
         ["POST", "/settings", {"section": "anthropic", "anthropic_api_key": "  sk-ant-NEW-KEY-123456  "}],
-        ["GET", "/settings?tab=models", {}],
-        ["GET", "/settings?tab=keys", {}],
+        ["GET", "/system?tab=models", {}],
+        ["GET", "/system?tab=keys", {}],
     ])
     pages += out
     assert out[0]["flash"]["success"] and not out[0]["flash"]["warnings"]

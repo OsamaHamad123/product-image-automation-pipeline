@@ -26,8 +26,7 @@
     $lqNavItems = [
         ['key' => 'home', 'route' => 'dashboard.index', 'label' => 'اليوم', 'icon' => 'home'],
         ['key' => 'review', 'route' => 'dashboard.catalog', 'label' => 'المراجعة', 'icon' => 'review', 'badge' => true],
-        ['key' => 'health', 'route' => 'dashboard.diagnostics', 'label' => 'الصحة والتكلفة', 'short' => 'الصحة', 'icon' => 'health'],
-        ['key' => 'settings', 'route' => 'dashboard.settings', 'label' => 'الإعدادات', 'icon' => 'settings', 'admin' => true],
+        ['key' => 'system', 'route' => 'dashboard.system', 'label' => 'النظام', 'icon' => 'settings'],
     ];
     // المراجع ما بيشوف روابط صفحات المدير (ReviewerLimits::ADMIN_PAGES بيمنعها عالسيرفر كمان)
     $lqReviewer = (bool) auth()->user()?->isReviewer();

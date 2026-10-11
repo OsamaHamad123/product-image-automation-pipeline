@@ -1053,7 +1053,7 @@ class ApiController extends Controller
                     'error' => 'لم يُضف أي منتج إلى طابور الأتمتة.' . $notFoundText], 422);
             }
             $message = "أُضيفت المنتجات إلى طابور الأتمتة (العدد: {$successCount})، ولا تبدأ معالجتها من هنا: "
-                . "شغّل التشغيل من صفحة «التشغيل» لمعالجتها. إن كان تشغيل جارٍ الآن فسيعالجها قبل أن ينتهي."
+                . "شغّل التشغيل من «اليوم» لمعالجتها. إن كان تشغيل جارٍ الآن فسيعالجها قبل أن ينتهي."
                 . $notFoundText;
 
             return response()->json(['status' => 'success', 'requeued' => $successCount, 'not_found' => $notFound, 'message' => $message]);

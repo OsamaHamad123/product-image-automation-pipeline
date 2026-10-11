@@ -10,7 +10,8 @@ use App\Http\Controllers\SettingsController;
  * is a link to what is already there (a page, ?tab=, ?filter=, or a card's #id).
  *
  * An entry is [title, group, href, words, admin]. `words` are extra search words (English names, other spellings).
- * admin = true: the reviewer gets no such entry (ReviewerLimits::ADMIN_PAGES blocks those pages on the server too).
+ * admin = true: the reviewer gets no such entry (ReviewerLimits::ADMIN_PAGES and the admin tabs of «النظام»,
+ * SystemController::tabFor, keep them from the reviewer on the server too).
  * The row number and free-text entries («افتح الصف 12», «دوّر على …») are built by jump.js from what is typed.
  */
 class GotoIndex
@@ -18,7 +19,7 @@ class GotoIndex
     public const PAGES = 'صفحات';
     public const REVIEW = 'المراجعة';
     public const RUN = 'التشغيل';
-    public const HEALTH = 'الصحة والتكلفة';
+    public const HEALTH = 'النظام';
     public const SETTINGS = 'الإعدادات';
 
     public static function entries(bool $reviewer): array
@@ -27,9 +28,9 @@ class GotoIndex
             ['اليوم', self::PAGES, '/', 'home overview today run', false],
             ['قائمة المراجعة (منتج واحد)', self::PAGES, '/catalog?mode=single', 'review single', false],
             ['المراجعة بالجملة', self::PAGES, '/catalog?mode=bulk', 'review bulk grid', false],
-            ['الصحة والتكلفة', self::PAGES, '/system-diagnostics', 'health cost diagnostics', false],
-            ['الإعدادات', self::PAGES, '/settings', 'settings', true],
-            ['جهّز لقطة (خطوات أول مرة)', self::PAGES, '/setup', 'setup wizard onboarding', true],
+            ['النظام: الحالة الآن', self::PAGES, '/system?tab=status', 'system health cost diagnostics الصحة والتكلفة', false],
+            ['الإعدادات', self::PAGES, '/system?tab=sheet', 'settings', true],
+            ['جهّز لقطة (خطوات أول مرة)', self::PAGES, '/system?tab=setup', 'setup wizard onboarding', true],
             ['فحص القص: الصور المنشورة على الغامق والفاتح', self::PAGES, '/catalog?mode=cutout', 'cutout recut background', true],
 
             ['مقترحة', self::REVIEW, '/catalog?filter=proposed', 'proposed suggested', false],
@@ -47,22 +48,23 @@ class GotoIndex
             ['جودة بيانات الشيت', self::RUN, '/#run-quality', 'sheet quality typo', true],
             ['تقرير للتحليل (تصدير التشغيل)', self::RUN, '/#run-export', 'export report json', true],
 
-            ['الخدمات وفحص الاتصالات', self::HEALTH, '/system-diagnostics#services', 'services connections check serper gemini', false],
-            ['فحص النشر', self::HEALTH, '/system-diagnostics#publish-check', 'publish check cloudinary', false],
-            ['آخر تشغيل', self::HEALTH, '/system-diagnostics#last-run', 'last run', false],
-            ['دقة الاقتراحات الحقيقية', self::HEALTH, '/system-diagnostics#lanes', 'accuracy lanes', false],
-            ['فهرس المتاجر المحلي', self::HEALTH, '/system-diagnostics#local-index', 'local index stores', false],
-            ['عمليات البحث والتكلفة', self::HEALTH, '/system-diagnostics#search-ops', 'search cost providers reasons', false],
-            ['السجل', self::HEALTH, '/system-diagnostics#logs', 'log nightly', false],
-            ['مجموعة اختبار من مراجعاتك', self::HEALTH, '/system-diagnostics#eval-export', 'eval export', true],
-            ['صور قديمة بخلفية بيضا (إعادة القص)', self::HEALTH, '/system-diagnostics#reprocess', 'recut reprocess', true],
+            ['الخدمات وفحص الاتصالات', self::HEALTH, '/system?tab=status#services', 'services connections check serper gemini', false],
+            ['آخر تشغيل', self::HEALTH, '/system?tab=status#last-run', 'last run', false],
+            ['دقة الاقتراحات الحقيقية', self::HEALTH, '/system?tab=status#lanes', 'accuracy lanes', false],
+            ['عمليات البحث والتكلفة', self::HEALTH, '/system?tab=search#search-ops', 'search cost providers reasons', false],
+            ['السجل', self::HEALTH, '/system?tab=logs#logs', 'log nightly', false],
+            // «أدوات» بـ«النظام»: للمدير بس (SystemController::GROUPS)
+            ['فحص النشر', self::HEALTH, '/system?tab=publish#publish-check', 'publish check cloudinary', true],
+            ['فهرس المتاجر المحلي', self::HEALTH, '/system?tab=index#local-index', 'local index stores', true],
+            ['مجموعة اختبار من مراجعاتك', self::HEALTH, '/system?tab=eval#eval-export', 'eval export', true],
+            ['صور قديمة بخلفية بيضا (إعادة القص)', self::HEALTH, '/system?tab=recut#reprocess', 'recut reprocess', true],
         ];
 
         foreach (SettingsController::TABS as $tab => $meta) {
-            $entries[] = [$meta['label'], self::SETTINGS, '/settings?tab=' . $tab, $meta['hint'], true];
+            $entries[] = [$meta['label'], self::SETTINGS, '/system?tab=' . $tab, $meta['hint'], true];
         }
         foreach (SettingsController::PROVIDERS as $id => $provider) {
-            $entries[] = ['مفتاح ' . $provider['name'], self::SETTINGS, '/settings?tab=keys#lq-key-' . $id,
+            $entries[] = ['مفتاح ' . $provider['name'], self::SETTINGS, '/system?tab=keys#lq-key-' . $id,
                           $provider['use'] . ' key api', true];
         }
 

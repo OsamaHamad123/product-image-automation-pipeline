@@ -1,4 +1,4 @@
-"""«جهّز لقطة»: the first-run setup wizard (SetupController, dashboard/setup.blade.php, public/js/setup.js, the bridge
+"""«جهّز لقطة»: the first-run setup wizard, the «التجهيز» section of «النظام» (SetupController, dashboard/setup.blade.php, public/js/setup.js, the bridge
 action setup_brands) and its Home card.
 
 - Structure: the page extends layouts.laqta, keeps its script and style in public/, every hook the script uses exists,
@@ -31,6 +31,7 @@ SETUP_VIEW = VIEWS / "dashboard" / "setup.blade.php"
 HOME_CARD = VIEWS / "setup" / "home_card.blade.php"
 HOME_VIEW = VIEWS / "dashboard" / "index.blade.php"
 SETTINGS_VIEW = VIEWS / "dashboard" / "settings.blade.php"
+SYSTEM_VIEW = VIEWS / "dashboard" / "system.blade.php"
 SETUP_JS = DASH / "public" / "js" / "setup.js"
 SETTINGS_JS = DASH / "public" / "js" / "settings.js"
 SETUP_CSS = DASH / "public" / "css" / "pages" / "setup.css"
@@ -63,7 +64,9 @@ def _fake_secret(tag):
 def test_routes_sit_before_the_ui_kit_line():
     routes = read(ROUTES)
     c = "\\App\\Http\\Controllers\\SetupController"
-    for line in (f"Route::get('/setup', [{c}::class, 'page'])->name('dashboard.setup');",
+    system = "\\App\\Http\\Controllers\\SystemController"
+    # the page is the «التجهيز» section of «النظام»: /setup(?step=) redirects to /system?tab=setup(&step=)
+    for line in (f"Route::get('/setup', [{system}::class, 'setup'])->name('dashboard.setup');",
                  f"Route::get('/api/setup/state', [{c}::class, 'state']);",
                  f"Route::post('/api/setup/check', [{c}::class, 'check']);",
                  f"Route::post('/api/setup/progress', [{c}::class, 'progress']);"):
@@ -72,18 +75,24 @@ def test_routes_sit_before_the_ui_kit_line():
 
 
 def test_the_page_extends_the_layout_and_loads_its_own_files():
-    view = read(SETUP_VIEW)
-    assert "@extends('layouts.laqta')" in view and "@section('title', 'جهّز لقطة')" in view
-    assert "@section('lq_nav', 'settings')" in view
-    # settings.js first (its sheet wording, window.LaqtaSettings), then the wizard
-    assert re.findall(r"asset\('js/([a-z-]+\.js)'\)", view) == ["settings.js", "setup.js"]
-    assert re.findall(r"asset\('css/pages/([a-z-]+\.css)'\)", view) == ["setup.css"]
+    view, system = read(SETUP_VIEW), read(SYSTEM_VIEW)
+    # a section of «النظام»: the page (title, nav, header, scripts) is system.blade.php
+    assert "@extends" not in view and "@push(" not in view and "x-lq.page-header" not in view
+    assert "@extends('layouts.laqta')" in system and "@section('title', 'النظام')" in system
+    assert "@section('lq_nav', 'system')" in system and "@include('dashboard.setup')" in system
+    # settings.js first (its sheet wording, window.LaqtaSettings), then the wizard, on the setup tab only
+    scripts = system[system.index("@push('scripts')"):]
+    assert scripts.index("asset('js/settings.js')") < scripts.index("@if ($systemKind === 'setup')") \
+        < scripts.index("asset('js/setup.js')")
+    assert "@elseif ($systemKind === 'setup')" in system and "asset('css/pages/setup.css')" in system
     assert not inline_scripts(view) and not re.search(r"(?:href|src)=\"(?:https?:)?//", view)
     assert '<script type="application/json" id="lq-setup-initial">@json($setup)</script>' in view
     # one body per step, and the Settings link back to the wizard
     for key in STEPS:
         assert f"@case('{key}')" in view, key
-    assert "route('dashboard.setup')" in read(SETTINGS_VIEW) and "جهّز لقطة خطوة بخطوة" in read(SETTINGS_VIEW)
+    # the rail's «التجهيز» tab, and «كمّل التجهيز (N من 5)» on top of it while setup is unfinished
+    assert "route('dashboard.system', ['tab' => 'setup'])" in system and "كمّل التجهيز (" in system
+    assert "'setup' => ['label' => 'التجهيز', 'admin' => true" in read(DASH / "app" / "Http" / "Controllers" / "SystemController.php")
     assert "@include('setup.home_card')" in read(HOME_VIEW) and "'setupCard' => SetupController::homeCard()," in read(
         DASH / "app" / "Http" / "Controllers" / "OverviewController.php")
 
@@ -313,7 +322,7 @@ def test_a_fresh_install_starts_at_the_sheet_with_a_clear_fix():
     assert (sheet["label"], sheet["tone"]) == ("بدها تصليح", "danger")
     keys = _step(view, "keys")
     assert [r["key"] for r in keys["rows"]] == ["serper", "gemini", "bg", "cloudinary"]
-    assert all(r["state"] == "غير محفوظ" and r["href"] == "/settings?tab=keys" for r in keys["rows"])
+    assert all(r["state"] == "غير محفوظ" and r["href"] == "/system?tab=keys" for r in keys["rows"])
 
 
 @NEEDS_LARAVEL
@@ -361,7 +370,7 @@ def test_keys_step_by_saved_state_last_check_and_background_method():
     assert failing_step["status"] == "fail" and serper["tone"] == "danger" and "رصيد" in serper["fix"]
     assert _step(out["untested"], "keys")["status"] == "todo" and "افحص المفاتيح" in _step(out["untested"], "keys")["rows"][1]["fix"]
     bg = {r["key"]: r for r in _step(out["removebg_missing"], "keys")["rows"]}["bg"]
-    assert bg["label"] == "عزل الخلفية · remove.bg" and "REMOVE_BG_API_KEY" in bg["fix"] and bg["href"] == "/settings?tab=processing"
+    assert bg["label"] == "عزل الخلفية · remove.bg" and "REMOVE_BG_API_KEY" in bg["fix"] and bg["href"] == "/system?tab=processing"
     assert _step(out["removebg_missing"], "keys")["status"] == "todo"
     assert _step(out["removebg"], "keys")["status"] == "ok" and _step(out["local"], "keys")["status"] == "ok"
     assert {r["key"]: r for r in _step(out["local"], "keys")["rows"]}["bg"]["state"] == "محلي على هالجهاز: ما بدو مفتاح"
@@ -583,7 +592,8 @@ $out = [];
 foreach (json_decode($argv[1], true) as [$method, $path, $params]) {{
     $request = Illuminate\\Http\\Request::create($path, $method, $params, [], [], ['HTTP_ACCEPT' => 'text/html,application/json']);
     $response = $kernel->handle($request);
-    $out[] = ['status' => $response->getStatusCode(), 'body' => $response->getContent()];
+    $out[] = ['status' => $response->getStatusCode(), 'body' => $response->getContent(),
+              'location' => $response->headers->get('Location')];
     $kernel->terminate($request, $response);
 }}
 echo json_encode($out, JSON_UNESCAPED_UNICODE);
@@ -610,10 +620,12 @@ def _state(db):
 
 
 def test_the_page_opens_at_the_first_open_step_and_checks_nothing(setup_app):
-    page, keys, state, home, settings = _kernel(setup_app["env"], [
-        ["GET", "/setup", {}], ["GET", "/setup?step=keys", {}], ["GET", "/api/setup/state", {}], ["GET", "/", {}],
-        ["GET", "/settings", {}]])
-    assert page["status"] == 200 and "<title>جهّز لقطة · لقطة</title>" in page["body"]
+    page, keys, state, home, settings, old = _kernel(setup_app["env"], [
+        ["GET", "/system?tab=setup", {}], ["GET", "/system?tab=setup&step=keys", {}], ["GET", "/api/setup/state", {}],
+        ["GET", "/", {}], ["GET", "/system?tab=sheet", {}], ["GET", "/setup?step=keys", {}]])
+    assert page["status"] == 200 and "<title>النظام · لقطة</title>" in page["body"]
+    assert re.search(r'href="[^"]+/system\?tab=setup"[^>]*aria-current="page"', page["body"])
+    assert old["status"] == 302 and old["location"].endswith("/system?tab=setup&step=keys")
     assert 'data-active="sheet"' in page["body"]
     assert re.search(r'data-setup-step="sheet" data-status="todo"[^>]*>', page["body"]).group(0).count("hidden") == 0
     assert re.search(r'data-setup-step="keys"[^>]*hidden', page["body"])
@@ -625,9 +637,11 @@ def test_the_page_opens_at_the_first_open_step_and_checks_nothing(setup_app):
     for value in setup_app["secrets"].values():
         for out in (page, keys, state, home, settings):
             assert value not in out["body"]
-    # the Home card while setup is incomplete, and the Settings link back to the wizard
+    # the Home card while setup is incomplete, and the rail's way back to the wizard on every section
     assert "data-home-setup" in home["body"] and "ابدأ التجهيز" in home["body"]
-    assert re.search(r'<a [^>]*href="[^"]*/setup"', settings["body"])
+    assert re.search(r'<a class="lq-btn[^"]*lq-home-setup__go" href="[^"]*/system\?tab=setup"', home["body"])
+    assert re.search(r'<a [^>]*href="[^"]*/system\?tab=setup"', settings["body"])
+    assert "data-system-setup-link" in settings["body"] and "كمّل التجهيز (0 من 5)" in settings["body"]
     assert _calls(setup_app) == [] and _state(setup_app["db"]) is None
 
 
@@ -639,7 +653,7 @@ def test_the_sheet_check_reads_the_saved_link_and_is_kept(setup_app):
     kept = _state(setup_app["db"])["checks"]["sheet"]
     assert kept["status"] == "ok" and kept["headers"] == 3 and kept["for"] == _fp({"url": SHEET_URL, "tab": "Products"})
     # resumable: opening the wizard again starts at the next step
-    (page,) = _kernel(setup_app["env"], [["GET", "/setup", {}]])
+    (page,) = _kernel(setup_app["env"], [["GET", "/system?tab=setup", {}]])
     assert 'data-active="keys"' in page["body"]
     # another tab name: the old check no longer counts
     (other,) = _kernel(dict(setup_app["env"], SPREADSHEET_TAB_NAME="Other"), [["GET", "/api/setup/state", {}]])
@@ -660,7 +674,7 @@ def test_the_brands_check_and_a_bridge_that_does_not_answer(setup_app):
     assert brands["status"] == "ok" and brands["rows"][-1]["state"] == "12 ماركة"
     (down,) = _kernel(dict(setup_app["env"], LQ_STUB_MODE="down"), [["POST", "/api/setup/check", {"step": "brands"}]])
     brands = _step(json.loads(down["body"]), "brands")
-    assert brands["status"] == "fail" and brands["rows"][0]["href"] == "/setup?step=sheet"
+    assert brands["status"] == "fail" and brands["rows"][0]["href"] == "/system?tab=setup&step=sheet"
     assert [c[0] for c in _calls(setup_app)] == ["setup_brands", "setup_brands"]
 
 
@@ -713,16 +727,17 @@ def test_the_first_run_plan_progress_and_finishing(setup_app):
     state = _state(setup_app["db"])
     assert state["done_at"] and state["checks"]["run"]["rows"] == "2, 4-7" and state["skipped"] == {}
     # finished: the Home page no longer shows the card; the wizard stays reachable and says it is done
-    home, page, reopened = _kernel(setup_app["env"], [["GET", "/", {}], ["GET", "/setup", {}],
+    home, page, reopened = _kernel(setup_app["env"], [["GET", "/", {}], ["GET", "/system?tab=setup", {}],
                                                       ["POST", "/api/setup/progress", {"action": "reopen"}]])
     assert home["status"] == 200 and "data-home-setup" not in home["body"]
     assert re.search(r'data-setup="done-note"\s*>', page["body"])
+    assert "data-system-setup-link" not in page["body"]                     # finished: no «كمّل التجهيز» on the rail
     assert json.loads(reopened["body"])["done"] is False
 
 
 def test_without_the_database_the_page_says_so_and_nothing_is_saved(setup_app):
     env = dict(setup_app["env"], DB_PORT="1")
-    page, check, progress, home = _kernel(env, [["GET", "/setup", {}], ["POST", "/api/setup/check", {"step": "brands"}],
+    page, check, progress, home = _kernel(env, [["GET", "/system?tab=setup", {}], ["POST", "/api/setup/check", {"step": "brands"}],
                                                 ["POST", "/api/setup/progress", {"action": "done"}], ["GET", "/", {}]])
     assert page["status"] == 200 and "قاعدة البيانات مش متاحة" in page["body"]
     assert check["status"] == 503 and progress["status"] == 503

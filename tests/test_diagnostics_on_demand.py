@@ -188,10 +188,10 @@ def test_controller_bounds_the_check_and_passes_the_last_result_to_the_page():
     deadline = int(re.search(r"DIAGNOSTICS_DEADLINE_SECONDS = (\d+);", text).group(1))
     kill = int(re.search(r"DIAGNOSTICS_KILL_SECONDS = (\d+);", text).group(1))
     assert deadline < kill <= 60
-    # the Laqta health page (HealthController::page) gets the saved result, never a fresh check
-    assert "function systemDiagnostics(" not in text           # /system-diagnostics routes to HealthController::page
-    assert "[\\App\\Http\\Controllers\\HealthController::class, 'page']" in read(ROUTES)
-    page = _method(read(HEALTH), "page")
+    # the status section of «النظام» (HealthController::pageData) gets the saved result, never a fresh check
+    assert "function systemDiagnostics(" not in text           # /system-diagnostics redirects to /system
+    assert "[\\App\\Http\\Controllers\\SystemController::class, 'diagnostics']" in read(ROUTES)
+    page = _method(read(HEALTH), "pageData")
     assert "$last = ProductController::lastDiagnostics();" in page
     assert "'lastDiagnostics' => self::publicResult($last)" in page
     assert "verify_cloud_services" not in read(HEALTH) and "run-diagnostics" not in read(HEALTH)
@@ -249,7 +249,7 @@ def test_button_and_note_say_what_a_check_costs():
     # Serper has its own card among the main services, never on the optional line
     health = read(HEALTH)
     services = health[health.index("public const SERVICES"):health.index("public const OPTIONAL_SERVICES")]
-    optional = health[health.index("public const OPTIONAL_SERVICES"):health.index("public function page")]
+    optional = health[health.index("public const OPTIONAL_SERVICES"):health.index("public static function pageData")]
     assert "'serper' =>" in services and "serper" not in optional
 
 

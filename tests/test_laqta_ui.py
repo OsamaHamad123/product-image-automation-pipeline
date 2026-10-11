@@ -77,7 +77,7 @@ REQUIRED_CLASSES = [
     "lq-empty", "lq-skeleton",
 ]
 
-NAV_ROUTES = ["dashboard.index", "dashboard.catalog", "dashboard.diagnostics", "dashboard.settings"]
+NAV_ROUTES = ["dashboard.index", "dashboard.catalog", "dashboard.system"]
 
 CLASS_RE = re.compile(r"(?<![\w-])lq-[a-z0-9]+(?:(?:__|--|-)[a-z0-9]+)*")
 CSS_CLASS_RE = re.compile(r"\.(lq-[a-z0-9]+(?:(?:__|--|-)[a-z0-9]+)*)")
@@ -248,7 +248,7 @@ def test_layout_is_arabic_rtl_shell():
     assert '<meta name="csrf-token" content="{{ csrf_token() }}">' in layout
     for directive in ("@yield('content')", "@stack('styles')", "@stack('scripts')"):
         assert directive in layout, directive
-    for text in ("لقطة", "استوديو صور المنتجات", "اليوم", "المراجعة", "الصحة والتكلفة", "الإعدادات"):
+    for text in ("لقطة", "استوديو صور المنتجات", "اليوم", "المراجعة", "النظام"):
         assert text in layout, text
     # «اليوم» merged the Home and Run pages: no «التشغيل» destination, no «الرئيسية» label
     assert "'dashboard.batch_automation'" not in layout and "'label' => 'الرئيسية'" not in layout
@@ -531,7 +531,7 @@ $response = $kernel->handle(Illuminate\\Http\\Request::create('/ui-kit', 'GET'))
 $out = ['status' => $response->getStatusCode(), 'body' => $response->getContent()];
 
 // The active nav item follows the current route.
-$request = Illuminate\\Http\\Request::create('/settings', 'GET');
+$request = Illuminate\\Http\\Request::create('/system', 'GET');
 $route = $app['router']->getRoutes()->match($request);
 $request->setRouteResolver(fn () => $route);
 $app->instance('request', $request);
@@ -591,8 +591,8 @@ def test_ui_kit_renders(rendered):
 def test_nav_marks_the_current_route(rendered):
     html = rendered["settings"]
     current = re.findall(r"<a href=\"([^\"]+)\"[^>]*aria-current=\"page\"", html)
-    assert len(current) == 1 and current[0].endswith("/settings"), current
-    assert "is-active" in re.search(r"<a href=\"[^\"]+/settings\"[^>]*>", html).group(0)
+    assert len(current) == 1 and current[0].endswith("/system"), current
+    assert "is-active" in re.search(r"<a href=\"[^\"]+/system\"[^>]*>", html).group(0)
 
 
 def test_page_opts_into_the_layout(rendered):

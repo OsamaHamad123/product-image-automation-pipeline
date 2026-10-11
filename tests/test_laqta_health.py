@@ -1,6 +1,8 @@
-"""Laqta Health (الصحة والتكلفة) and Settings (الإعدادات) pages, package p2-health.
+"""Laqta Health (الصحة والتكلفة) and Settings (الإعدادات), package p2-health: since phase 3 sections of one page,
+«النظام» (/system?tab=…, system.blade.php; the old addresses redirect there, test_system_page.py).
 
-- Structure: both pages extend layouts.laqta, keep their script in public/js and their style in public/css/pages,
+- Structure: the page extends layouts.laqta, the partials hold no layout of their own, the scripts stay in public/js and
+  the styles in public/css/pages,
   use only hooks, classes and tokens that exist, and show no raw decision/failure codes and no user chip.
 - One vocabulary, one source: the PHP helpers behind the service cards, the key states and the auto-publish table run
   under the PHP CLI and are compared with the page script and with the Python code they mirror
@@ -29,6 +31,7 @@ DASH = ROOT / "dashboard"
 VIEWS = DASH / "resources" / "views"
 HEALTH = VIEWS / "dashboard" / "diagnostics.blade.php"
 SETTINGS = VIEWS / "dashboard" / "settings.blade.php"
+SYSTEM = VIEWS / "dashboard" / "system.blade.php"
 PARTIALS = sorted((VIEWS / "settings").glob("*.blade.php"))
 JS = DASH / "public" / "js"
 HEALTH_JS, SETTINGS_JS = JS / "health.js", JS / "settings.js"
@@ -45,7 +48,7 @@ NODE = shutil.which("node")
 NEEDS_PHP = pytest.mark.skipif(PHP is None, reason="php is not installed")
 NEEDS_NODE = pytest.mark.skipif(NODE is None, reason="node is not installed")
 
-VIEW_FILES = [HEALTH, SETTINGS] + PARTIALS
+VIEW_FILES = [SYSTEM, HEALTH, SETTINGS] + PARTIALS
 PAGE_FILES = VIEW_FILES + [HEALTH_JS, SETTINGS_JS, HEALTH_CSS, SETTINGS_CSS]
 RAW_CODES = ["REVIEW_PRESELECTED", "REVIEW_UNSELECTED", "NO_RESULTS", "PROVIDER_DOWN", "ALL_CONFLICTED",
              "SERPER_CREDIT", "GEMINI_DOWN", "VERIFIER_DOWN", "AUTO_PUBLISH_ENABLED", "needs_reviews", "low_precision"]
@@ -60,19 +63,23 @@ def read(path: Path) -> str:
 # Structure
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("path, nav, title, script", [(HEALTH, "health", "الصحة والتكلفة", "health.js"),
-                                                       (SETTINGS, "settings", "الإعدادات", "settings.js")],
-                         ids=["health", "settings"])
-def test_pages_extend_the_laqta_layout(path, nav, title, script):
-    text = read(path)
+def test_the_page_extends_the_laqta_layout_and_the_sections_are_partials():
+    text = read(SYSTEM)
     assert "@extends('layouts.laqta')" in text and "layouts.layout'" not in text
-    assert f"@section('title', '{title}')" in text and f"@section('lq_nav', '{nav}')" in text
+    assert "@section('title', 'النظام')" in text and "@section('lq_nav', 'system')" in text
     assert "@push('styles')" in text and "@push('scripts')" in text
-    assert re.findall(r"asset\('js/([a-z-]+\.js)'\)", text) == [script]
-    assert re.findall(r"asset\('css/pages/([a-z-]+\.css)'\)", text) == [script.replace(".js", ".css")]
+    # each section's script and style: health.js on the health sections, settings.js on the settings tabs (and before
+    # setup.js on the setup tab); settings.css carries the rail, so it is on every section
+    assert re.findall(r"asset\('js/([a-z-]+\.js)'\)", text) == ["health.js", "settings.js", "setup.js"]
+    assert re.findall(r"asset\('css/pages/([a-z-]+\.css)'\)", text) == ["settings.css", "health.css", "setup.css"]
+    for path in (HEALTH, SETTINGS):
+        part = read(path)
+        assert "@extends" not in part and "@section(" not in part and "@push(" not in part, path.name
+        assert "x-lq.page-header" not in part, path.name                  # one page header: «النظام»
     # no inline executable script and nothing from another host
-    assert not inline_scripts(text)
-    assert not re.search(r"(?:href|src)=\"(?:https?:)?//", text)
+    for path in (SYSTEM, HEALTH, SETTINGS):
+        assert not inline_scripts(read(path)), path.name
+        assert not re.search(r"(?:href|src)=\"(?:https?:)?//", read(path)), path.name
 
 
 def test_settings_partials_and_the_old_page():
@@ -105,7 +112,7 @@ def test_every_hook_the_scripts_use_exists_in_the_page():
     for hook in ("data-service-state", "data-service-dot", "data-service-details", "data-service-details-text",
                  "data-log-tab", "data-health-page", 'id="lq-health-initial"'):
         assert hook in health_view, hook
-    settings = "\n".join(read(p) for p in [SETTINGS] + PARTIALS)
+    settings = "\n".join(read(p) for p in [SYSTEM, SETTINGS] + PARTIALS)
     for attr in set(re.findall(r"\[(data-[a-z-]+)", read(SETTINGS_JS))):
         assert attr in settings, attr
 
@@ -127,7 +134,8 @@ def test_classes_and_tokens_exist():
            "lq-health-search-title", "lq-health-results-title", "lq-health-cost-title",
            "lq-health-reasons-title", "lq-health-log-title", "lq-health-log-body", "lq-settings-sheet-title",
            "lq-settings-keys-title", "lq-settings-ap-title", "lq-settings-processing-title",
-           "lq-settings-advanced-title", "lq-settings-models-title", "lq-settings-sources-title", "lq-settings-speed-title", "lq-key-form", "lq-page-health", "lq-page-settings", "lq-health-spin",
+           "lq-settings-advanced-title", "lq-settings-models-title", "lq-settings-sources-title", "lq-settings-speed-title", "lq-key-form", "lq-page-system", "lq-health-spin",
+           "lq-system-panel", "lq-system-group",
            # the cards a save lands on (?tab=…#id, SettingsController::anchorFor)
            "lq-settings-speed", "lq-settings-sources", "lq-settings-advanced", "lq-settings-models",
            "lq-settings-processing", "lq-settings-auto-publish", "lq-settings-strict-lane", "lq-key",
@@ -166,9 +174,11 @@ def test_page_scripts_parse_and_stay_plain(path):
 def test_routes():
     routes = read(ROUTES)
     health, settings = "\\App\\Http\\Controllers\\HealthController", "\\App\\Http\\Controllers\\SettingsController"
+    system = "\\App\\Http\\Controllers\\SystemController"
     for line in (
-        f"Route::get('/system-diagnostics', [{health}::class, 'page'])->name('dashboard.diagnostics');",
-        f"Route::get('/settings', [{settings}::class, 'show'])->name('dashboard.settings');",
+        f"Route::get('/system', [{system}::class, 'show'])->name('dashboard.system');",
+        f"Route::get('/system-diagnostics', [{system}::class, 'diagnostics'])->name('dashboard.diagnostics');",
+        f"Route::get('/settings', [{system}::class, 'settings'])->name('dashboard.settings');",
         f"Route::post('/settings', [{settings}::class, 'save'])->name('dashboard.save_settings');",
         "Route::get('/active-learning', [ProductController::class, 'activeLearning'])->name('dashboard.active_learning');",
         f"Route::get('/api/view-pipeline-log', [{health}::class, 'pipelineLog']);",
@@ -916,8 +926,8 @@ echo json_encode($out, JSON_UNESCAPED_UNICODE);
 
 TABS = ["sheet", "keys", "models", "auto-publish", "processing", "advanced"]
 N_PAGES = 3 + len(TABS)
-PAGES = [["GET", "/system-diagnostics", {}], ["GET", "/active-learning", {}], ["GET", "/settings?tab=bogus", {}]] \
-    + [["GET", f"/settings?tab={tab}", {}] for tab in TABS] \
+PAGES = [["GET", "/system", {}], ["GET", "/active-learning", {}], ["GET", "/settings?tab=bogus", {}]] \
+    + [["GET", f"/system?tab={tab}", {}] for tab in TABS] \
     + [["GET", "/api/view-pipeline-log", {}], ["GET", "/api/view-laravel-log", {}]]
 
 
@@ -925,14 +935,15 @@ def test_routes_render_redirect_and_never_show_a_stored_key(app_env):
     out = _kernel(app_env["env"], PAGES)
     health, active, bogus = out[0], out[1], out[2]
     assert health["status"] == 200, health["body"][:2000]
-    assert "<title>الصحة والتكلفة · لقطة</title>" in health["body"] and 'class="lq-sidebar"' in health["body"]
-    assert re.search(r'<a href="[^"]+/system-diagnostics"[^>]*aria-current="page"', health["body"])
+    assert "<title>النظام · لقطة</title>" in health["body"] and 'class="lq-sidebar"' in health["body"]
+    assert re.search(r'<a href="[^"]+/system"[^>]*aria-current="page"', health["body"])
     assert "data-health-page" in health["body"] and "فحص الاتصالات الآن" in health["body"]
     assert active["status"] == 302 and active["location"].endswith("/settings?tab=auto-publish")
-    assert bogus["status"] == 200 and re.search(r'href="[^"]+\?tab=sheet"[^>]*aria-current="page"', bogus["body"])
+    # an unknown settings tab: the redirect lands on the first one (ربط الشيت)
+    assert bogus["status"] == 302 and bogus["location"].endswith("/system?tab=sheet")
     for tab, page in zip(TABS, out[3:N_PAGES]):
         assert page["status"] == 200, (tab, page["body"][:2000])
-        assert "<title>الإعدادات · لقطة</title>" in page["body"]
+        assert "<title>النظام · لقطة</title>" in page["body"]
         assert re.search(rf'href="[^"]+\?tab={tab}"[^>]*aria-current="page"', page["body"]), tab
         for leftover in ("{{", "{!!", "@props", "<x-lq", "@json", "@include"):
             assert leftover not in page["body"], (tab, leftover)
@@ -991,7 +1002,8 @@ def test_each_form_saves_only_its_own_section(app_env):
     for key in ("auto_publish_brands", "auto_publish_enabled", "filter_competitors", "strict_brand_match",
                 "search_engine", "gemini_model"):
         assert after[key] == before[key], key
-    # each save lands on its own card (?tab=…#id, SettingsController::anchorFor); an unknown section on the tab only
+    # each save lands on its own card (/system?tab=…#id, SettingsController::anchorFor); an unknown section on the tab only
+    assert all("/system?tab=" in r["location"] for r in out)
     assert [r["location"].split("?tab=")[-1] for r in out] == [
         "keys#lq-key-serper", "keys#lq-key-gemini", "keys#lq-key-photoroom", "keys#lq-key-cloudinary",
         "processing#lq-settings-processing", "processing#lq-settings-processing", "keys"]
@@ -1036,7 +1048,7 @@ def test_auto_publish_rules_on_the_server(app_env):
 
     out = _kernel(env, [
         ["POST", "/settings", {"section": "auto-publish", "auto_publish_enabled": "true"}],
-        ["GET", "/settings?tab=auto-publish", {}],
+        ["GET", "/system?tab=auto-publish", {}],
         ["POST", "/settings", {"section": "brand", "op": "disable", "brand": "Almarai"}],
     ])
     assert out[0]["flash"]["warnings"] in (None, [])
@@ -1053,7 +1065,7 @@ def test_auto_publish_rules_on_the_server(app_env):
     down = _kernel(dict(env, LQ_STUB_MODE="down"), [
         ["POST", "/settings", {"section": "brand", "op": "enable", "brand": "ALMARAI"}],
         ["POST", "/settings", {"section": "auto-publish", "auto_publish_enabled": "true"}],
-        ["GET", "/settings?tab=auto-publish", {}],
+        ["GET", "/system?tab=auto-publish", {}],
     ])
     assert "ما قدرنا نتأكد" in down[0]["flash"]["error"] and "ما قدرنا نتأكد" in down[1]["flash"]["warnings"][0]
     assert "ما قدرنا نحسب دقة الماركات" in down[2]["body"]
@@ -1070,9 +1082,9 @@ def test_strict_lane_switch_is_free_and_the_page_says_when_it_publishes(app_env)
     Once ready, the main switch may open without a listed brand (as before)."""
     db, env = app_env["db"], app_env["env"]
     out = _kernel(env, [
-        ["GET", "/settings?tab=auto-publish", {}],
+        ["GET", "/system?tab=auto-publish", {}],
         ["POST", "/settings", {"section": "strict-lane", "auto_publish_strict_lane": "true"}],
-        ["GET", "/settings?tab=auto-publish", {}],
+        ["GET", "/system?tab=auto-publish", {}],
     ])
     page = out[0]["body"]                                   # app_env saved 'false': the owner's value wins
     assert "النشر الآلي لكل الماركات المؤكدة" in page and "لسا ما راجعت ولا اقتراح بهالفئة." in page
@@ -1086,7 +1098,7 @@ def test_strict_lane_switch_is_free_and_the_page_says_when_it_publishes(app_env)
     assert "شغّال، بس لسا ما بينشر لحاله: بيبلّش ينشر بعد ما تعتمد 189 اقتراح مؤكد كمان" in page and "لتطفيه" in page
 
     _sql(db, "DELETE FROM system_settings WHERE `key` = 'auto_publish_strict_lane'")         # nothing saved: on
-    page = _kernel(env, [["GET", "/settings?tab=auto-publish", {}]])[0]["body"]
+    page = _kernel(env, [["GET", "/system?tab=auto-publish", {}]])[0]["body"]
     assert re.search(r'name="auto_publish_strict_lane"[^>]*checked', page)
 
     down = _kernel(dict(env, LQ_STUB_MODE="down"), [
@@ -1096,7 +1108,7 @@ def test_strict_lane_switch_is_free_and_the_page_says_when_it_publishes(app_env)
     ready = _kernel(dict(env, LQ_STUB_MODE="lane_ready"), [
         ["POST", "/settings", {"section": "strict-lane", "auto_publish_strict_lane": "true"}],
         ["POST", "/settings", {"section": "auto-publish", "auto_publish_enabled": "true"}],     # no brand listed
-        ["GET", "/settings?tab=auto-publish", {}],
+        ["GET", "/system?tab=auto-publish", {}],
     ])
     assert "فئته جاهزة" in ready[0]["flash"]["success"]
     assert ready[1]["flash"]["warnings"] in (None, [])
@@ -1140,7 +1152,7 @@ def test_extra_sources_form_saves_checks_and_shows_its_section(app_env):
     out = _kernel(env, [
         ["POST", "/settings", {"section": "sources", "expansion_enabled": "true", "expansion_max_calls": "6",
                                "visual_search": "serpapi", "serpapi_lens_price_usd": "0.02", "gtin_policy": "strict"}],
-        ["GET", "/settings?tab=advanced", {}],
+        ["GET", "/system?tab=advanced", {}],
         # every value refused: the stored ones stay, one warning each; the switch left off turns the round off
         ["POST", "/settings", {"section": "sources", "expansion_max_calls": "12", "visual_search": "lens",
                                "serpapi_lens_price_usd": "abc", "gtin_policy": "hard"}],
@@ -1166,7 +1178,7 @@ def test_extra_sources_form_saves_checks_and_shows_its_section(app_env):
 
     # SerpApi chosen without a saved key: the page says visual search is off until the key is added
     _put(db, {"serpapi_api_key": ""})
-    page = _kernel(env, [["GET", "/settings?tab=advanced", {}]])[0]["body"]
+    page = _kernel(env, [["GET", "/system?tab=advanced", {}]])[0]["body"]
     assert "مفتاح SerpApi مش محفوظ" in page and "مفتاح SerpApi: غير محفوظ" in page
 
 
@@ -1180,7 +1192,7 @@ def test_local_index_switch_and_pages_save_and_the_page_says_what_the_index_hold
     try:
         saved, empty_page, refused = _kernel(env, [
             ["POST", "/settings", {"section": "sources", "expansion_enabled": "true", "local_index_max_pages": "5"}],
-            ["GET", "/settings?tab=advanced", {}],
+            ["GET", "/system?tab=advanced", {}],
             ["POST", "/settings", {"section": "sources", "expansion_enabled": "true", "local_index_enabled": "true",
                                    "local_index_max_pages": "12"}],
         ])
@@ -1198,7 +1210,7 @@ def test_local_index_switch_and_pages_save_and_the_page_says_what_the_index_hold
                  (store, f"https://example.ae/p/{i}", f"{i:040d}", "x"))
         _sql(db, "INSERT INTO catalog_harvests (store, started_at, finished_at, status) "
                  "VALUES ('lulu', NOW(), '2026-10-03 09:30:00', 'ok')")
-        page = _kernel(env, [["GET", "/settings?tab=advanced", {}]])[0]["body"]
+        page = _kernel(env, [["GET", "/system?tab=advanced", {}]])[0]["body"]
         assert re.search(r'name="local_index_enabled"[^>]*checked', page)
         assert "بالفهرس 3 صفحة منتج من 2 متجر" in page and "2026-10-03 09:30:00" in page
         assert "الفهرس لسا ما انبنى" not in page
@@ -1209,8 +1221,8 @@ def test_local_index_switch_and_pages_save_and_the_page_says_what_the_index_hold
 
 def test_unavailable_database_is_said(app_env):
     env = dict(app_env["env"], DB_PORT="1")                                  # nothing listens on port 1
-    out = _kernel(env, [["GET", "/settings?tab=keys", {}], ["GET", "/settings?tab=sheet", {}],
-                        ["GET", "/system-diagnostics", {}],
+    out = _kernel(env, [["GET", "/system?tab=keys", {}], ["GET", "/system?tab=sheet", {}],
+                        ["GET", "/system", {}],
                         ["POST", "/settings", {"section": "serper", "serper_api_key": "X-KEY-1234567"}]])
     assert out[0]["status"] == 200 and "ما قدرنا نقرأ الإعدادات" in out[0]["body"] and "غير محفوظ" not in out[0]["body"]
     assert "بلّغ المطوّر، وحدّث الصفحة بعد ما تنصلح." in out[0]["body"] and "MariaDB شغّالة" not in out[0]["body"]

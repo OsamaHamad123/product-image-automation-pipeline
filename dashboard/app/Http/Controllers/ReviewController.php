@@ -112,8 +112,8 @@ class ReviewController extends Controller
                 'export' => route('dashboard.rich_catalog.export'),
                 // «اليوم» (/): the run panel; review/*.js adds ?scope=rows&rows=… or #run-brands to it
                 'run' => rtrim(route('dashboard.index'), '/') . '/',
-                // «افحص النشر» بلوحة الاعتمادات اللي ما مشيت: بطاقة «فحص النشر» بصفحة الصحة
-                'publishCheck' => route('dashboard.diagnostics') . '#publish-check',
+                // «افحص النشر» بلوحة الاعتمادات اللي ما مشيت: بطاقة «فحص النشر» بقسم «أدوات» بصفحة «النظام»
+                'publishCheck' => url(SystemController::url('publish', [], 'publish-check')),
                 // «تجاوز عزل الخلفية» بنفس اللوحة (رصيد أو مفتاح أو حصة PhotoRoom / remove.bg): SettingsController::setBgMethod
                 'bgMethod' => url('/api/settings/bg-method'),
                 // سطر «النشر التلقائي لكل الماركات المؤكدة» بوضع الجملة: أرقام فئة strict من بطاقة الصحة (HealthController::reviewLanes)

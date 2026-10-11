@@ -27,7 +27,7 @@
         imageProxy: '/api/image-proxy',
         export: '/rich-catalog/export',
         run: '/',
-        publishCheck: '/system-diagnostics#publish-check',
+        publishCheck: '/system?tab=publish#publish-check',
         bgMethod: '/api/settings/bg-method',
         reviewLanes: '/api/system/review-lanes'
     };

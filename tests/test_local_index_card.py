@@ -51,12 +51,14 @@ def test_routes_and_hooks():
     view, js = read(HEALTH_VIEW), read(HEALTH_JS)
     for hook in ("index-card", "index-rows", "index-last-run", "index-status", "index-refresh", "index-refresh-label"):
         assert f'data-health="{hook}"' in view, hook
-    assert "'localIndex' => LocalIndexController::card()" in read(DASH / "app" / "Http" / "Controllers" / "HealthController.php")
+    assert "$data['localIndex'] = LocalIndexController::card();" in read(DASH / "app" / "Http" / "Controllers" / "HealthController.php")
     assert "فهرس المتاجر المحلي" in view and "حدّث الفهرس هلق" in view
     # the card has its own JS functions and its own URLs; the page still loads exactly one script
     assert "function localIndexView(" in js and "function createLocalIndex(" in js
     assert "'/api/system/local-index/refresh'" in js and "'/api/system/local-index'" in js
-    assert re.findall(r"asset\('js/([a-z-]+\.js)'\)", view) == ["health.js"]
+    # a section of «النظام» (?tab=index): the page loads health.js for it
+    assert re.findall(r"asset\('js/([a-z-]+\.js)'\)", view) == []
+    assert "asset('js/health.js')" in read(HEALTH_VIEW.parent / "system.blade.php")
 
 
 @NEEDS_PHP
@@ -324,7 +326,7 @@ def _pages(db, store, n):
 
 def test_the_health_page_shows_each_store_with_its_pages_last_harvest_and_status(index_app):
     db, env = index_app["db"], index_app["env"]
-    (empty,) = _kernel(env, [["GET", "/system-diagnostics", {}]])
+    (empty,) = _kernel(env, [["GET", "/system?tab=index", {}]])
     assert empty["status"] == 200 and 'data-health="index-card"' in empty["body"]
     for name in ("Lulu Hypermarket UAE", "Carrefour UAE", "Spinneys UAE", "talabat mart UAE", "Sharjah Co-op", "noon UAE",
                  "Union Coop"):
@@ -337,7 +339,7 @@ def test_the_health_page_shows_each_store_with_its_pages_last_harvest_and_status
     _harvest(db, "lulu", "3 DAY", "ok")
     _harvest(db, "spinneys", "1 DAY", "blocked")
     _harvest(db, "sharjahcoop", "5 HOUR", "partial")
-    (page,) = _kernel(env, [["GET", "/system-diagnostics", {}]])
+    (page,) = _kernel(env, [["GET", "/system?tab=index", {}]])
     body = page["body"]
     lulu = re.search(r'data-store="lulu" data-state="ok".*?</div>', body, re.S).group(0)
     assert "3 صفحات" in lulu and "تمام" in lulu and "آخر جمع ناجح من 3 أيام" in lulu
@@ -356,7 +358,7 @@ def test_the_page_says_when_a_store_with_a_visit_time_may_be_read(index_app):
     ROBOTS.parent.mkdir(exist_ok=True)
     ROBOTS.write_text(json.dumps({"sharjahcoop": {"visit_time": [[240, 525]], "checked_at": int(time.time())}}),
                       encoding="utf-8")
-    (page,) = _kernel(env, [["GET", "/system-diagnostics", {}]])
+    (page,) = _kernel(env, [["GET", "/system?tab=index", {}]])
     row = re.search(r'data-store="sharjahcoop".*?</div>', page["body"], re.S).group(0)
     assert "بيسمح بالقراءة بين 08:00 و12:45 بتوقيت الإمارات" in row
     assert "بيسمح بالقراءة" not in re.search(r'data-store="lulu".*?</div>', page["body"], re.S).group(0)
@@ -370,7 +372,7 @@ def test_the_page_shows_the_refresh_progress_on_reload(index_app):
                                  "plan": [{"store": "lulu"}, {"store": "spinneys"}, {"store": "sharjahcoop"}],
                                  "results": [{"store": "lulu"}]}), encoding="utf-8")
     LOCK.write_text(json.dumps({"pid": 1, "budget_s": 300}), encoding="utf-8")
-    running, api = _kernel(env, [["GET", "/system-diagnostics", {}], ["GET", "/api/system/local-index", {}]])
+    running, api = _kernel(env, [["GET", "/system?tab=index", {}], ["GET", "/api/system/local-index", {}]])
     assert "عم نحدّث الفهرس بالخلفية: Spinneys UAE (2 من 3)" in running["body"]
     assert re.search(r'data-health="index-refresh"[^>]*disabled', running["body"]) and "عم يحدّث…" in running["body"]
     card = json.loads(api["body"])
@@ -378,7 +380,7 @@ def test_the_page_shows_the_refresh_progress_on_reload(index_app):
     LOCK.unlink()
     STATE.write_text(json.dumps({"state": "idle", "ended": "done", "finished_at": now - 2 * HOUR,
                                  "results": [{"store": "lulu"}]}), encoding="utf-8")
-    (done,) = _kernel(env, [["GET", "/system-diagnostics", {}]])
+    (done,) = _kernel(env, [["GET", "/system?tab=index", {}]])
     assert "آخر تحديث من ساعتين: خلص (قرينا متجر واحد)" in done["body"]
     assert not re.search(r'data-health="index-refresh"[^>]*disabled', done["body"])
 
@@ -405,6 +407,6 @@ def test_the_button_endpoint_needs_the_csrf_token_like_every_post(index_app):
 
 def test_without_the_database_the_card_says_so_and_the_page_still_opens(index_app):
     env = dict(index_app["env"], DB_PORT="1")
-    (page,) = _kernel(env, [["GET", "/system-diagnostics", {}]])
+    (page,) = _kernel(env, [["GET", "/system?tab=index", {}]])
     assert page["status"] == 200 and "ما قدرنا نقرأ الفهرس: قاعدة البيانات مش متاحة" in page["body"]
     assert "Sharjah Co-op" in page["body"] and "بالفهرس" not in page["body"]

@@ -420,8 +420,8 @@ sources.elements = [{ name: 'expansion_enabled', type: 'checkbox', value: 'true'
 const page = new El('div');
 page.kids.form = [speed, sources];
 const tabLink = new El('a', ['a[href]']);
-tabLink.setAttribute('href', '/settings?tab=keys');
-tabLink.href = 'http://x/settings?tab=keys';
+tabLink.setAttribute('href', '/system?tab=keys');      // a link of the «النظام» rail
+tabLink.href = 'http://x/system?tab=keys';
 // a submit: capture listeners on the page, the form's own listeners, then the document (bubble)
 function submit(form) {
     let prevented = false, stopped = false;
@@ -456,7 +456,7 @@ globalThis.document = {
     getElementById: () => null
 };
 globalThis.addEventListener = (t, fn) => { (winListeners[t] = winListeners[t] || []).push(fn); };
-globalThis.location = { pathname: '/settings', search: '?tab=advanced', hash: '', href: 'http://x/settings?tab=advanced' };
+globalThis.location = { pathname: '/system', search: '?tab=advanced', hash: '', href: 'http://x/system?tab=advanced' };
 const asked = [];
 let answer = false;
 globalThis.confirm = t => { asked.push(t); return answer; };
@@ -527,7 +527,9 @@ globalThis.Laqta = { ask: o => { asks.push(o); return Promise.resolve(reply); },
 def test_a_settings_save_lands_on_its_card():
     php = read(CONTROLLER)
     assert "$anchor = self::anchorFor(self::field(request(), 'section'));" in php
-    assert "($anchor !== '' ? '#' . $anchor : '')" in php
+    # on its card in its tab of «النظام»: /system?tab=…#id (SystemController::url adds the # only for an anchor)
+    assert "SystemController::url(self::tabFrom($tab), [], $anchor)" in php
+    assert "($hash !== '' ? '#' . $hash : '')" in read(CONTROLLER.parent / "SystemController.php")
     views = "".join(read(p) for p in (VIEWS / "settings").glob("*.blade.php"))
     for anchor in ("speed", "sources", "advanced", "models", "processing", "auto-publish", "strict-lane"):
         assert f'id="lq-settings-{anchor}"' in views, anchor

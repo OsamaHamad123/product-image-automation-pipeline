@@ -45,9 +45,10 @@ PLAYWRIGHT = _playwright_module()
 pytestmark = pytest.mark.skipif(PLAYWRIGHT is None or not CHROME or PHP is None or not (DASH / "vendor" / "autoload.php").exists(),
                                 reason="node Playwright, Chromium, php or dashboard/vendor is missing")
 
-WIZARD = {"setup_sheet": "/setup?step=sheet", "setup_keys": "/setup?step=keys", "setup_brands": "/setup?step=brands",
-          "setup_publish": "/setup?step=publish", "setup_run": "/setup?step=run", "setup_ready": "/setup?step=ready",
-          "home": "/"}
+# the «التجهيز» section of «النظام» (/setup?step= redirects there)
+WIZARD = {"setup_sheet": "/system?tab=setup&step=sheet", "setup_keys": "/system?tab=setup&step=keys",
+          "setup_brands": "/system?tab=setup&step=brands", "setup_publish": "/system?tab=setup&step=publish",
+          "setup_run": "/system?tab=setup&step=run", "setup_ready": "/system?tab=setup&step=ready", "home": "/"}
 NOW = datetime.now(timezone.utc).isoformat(timespec="seconds")
 PUBLISH_RESULT = {
     "ok": True, "overall": "ok", "started_at": NOW, "finished_at": NOW, "duration_ms": 41000,
@@ -176,7 +177,7 @@ const out = { errors: {}, overflow: {}, posts: [] };
         await shot(page, `setup_run_done_${width}.png`);
       }
       if (name === 'setup_sheet' && width === 1440) {
-        // the stepper moves between steps without a reload and keeps ?step= in the address
+        // the stepper moves between steps without a reload and keeps ?tab=setup&step= in the address
         await page.click('[data-setup-tab="brands"]');
         out.stepper = await page.evaluate(() => [location.search, !document.querySelector('[data-setup-step="brands"]').hidden,
                                                  document.querySelector('[data-setup-step="sheet"]').hidden]);
@@ -221,8 +222,8 @@ def test_the_wizard_in_a_browser(setup_app, tmp_path):
         assert out[f"publish@{width}"].startswith("النشر شغّال")
         assert out[f"plan@{width}"].startswith("رح ندوّر على صور 5 منتجات من الشيت (الصفوف 2, 4-7)")
         status, live, search = out[f"run@{width}"]
-        assert status == "ok" and live == "خلص التشغيل: 4 مقترحة · 1 ما انلقت." and search == "?step=run"
-    assert out["stepper"] == ["?step=brands", True, True] and out["next"] == "?step=publish"
+        assert status == "ok" and live == "خلص التشغيل: 4 مقترحة · 1 ما انلقت." and search == "?tab=setup&step=run"
+    assert out["stepper"] == ["?tab=setup&step=brands", True, True] and out["next"] == "?tab=setup&step=publish"
     posts = [p[0] for p in out["posts"]]
     assert "/api/run-all" in posts and json.loads(dict(out["posts"])["/api/run-all"])["row_filter"] == "2, 4-7"
     for name in list(WIZARD) + ["setup_keys_tested", "setup_publish_done", "setup_run_plan", "setup_run_done"]:
@@ -231,7 +232,7 @@ def test_the_wizard_in_a_browser(setup_app, tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# The Health page: «كلشي تمام» / «شو بدو منك» on top, «تفاصيل متقدمة» collapsed
+# «النظام» › «الحالة الآن»: «كلشي تمام» / «شو بدو منك» on top; each fix links to the section that holds it
 # ---------------------------------------------------------------------------
 
 PUBLISH_FAILED = dict(PUBLISH_RESULT, ok=False, overall="fail", failed_step="upload",
@@ -257,7 +258,7 @@ COMMON = {"/api/system/review-lanes": {"status": "success", "lanes": {"strict": 
 
 def _health_fixture(app, pages_dir):
     env = app["env"]
-    (ok_page,) = _kernel(env, [["GET", "/system-diagnostics", {}]])
+    (ok_page,) = _kernel(env, [["GET", "/system", {}]])
     (pages_dir / "health_ok.html").write_text(ok_page["body"], encoding="utf-8")
     # trouble: a DEAD sheet write, a failed rehearsal, and (through ops-health) Serper's credit
     _sql(app["db"], "INSERT INTO sheet_updates (`row_number`, `col_index`, `value`, sync_status) VALUES (7, 3, %s, 'DEAD')",
@@ -265,9 +266,12 @@ def _health_fixture(app, pages_dir):
     publish_file = ROOT / "temp" / "publish_check_last.json"
     publish_file.parent.mkdir(parents=True, exist_ok=True)
     publish_file.write_text(json.dumps(PUBLISH_FAILED, ensure_ascii=False), encoding="utf-8")
-    page, _, attention = _kernel(env, [["GET", "/system-diagnostics", {}], ["GET", "/api/system/ops-health", {}],
-                                       ["GET", "/api/system/attention?after=1", {}]])
+    page, _, attention, publish = _kernel(env, [["GET", "/system", {}], ["GET", "/api/system/ops-health", {}],
+                                                ["GET", "/api/system/attention?after=1", {}],
+                                                ["GET", "/system?tab=publish", {}]])
     (pages_dir / "health_attention.html").write_text(page["body"], encoding="utf-8")
+    # «أدوات» › «فحص النشر»: where the rehearsal's fix and the old #publish-check links land
+    (pages_dir / "health_publish.html").write_text(publish["body"], encoding="utf-8")
     ok = _attention_php(f"$out = A::view({_v(_attention_facts())}, null, true);")
     return {"health_ok": dict(COMMON, **{"/api/system/ops-health": OPS_QUIET, "/api/system/attention": ok}),
             "health_attention": dict(COMMON, **{"/api/system/ops-health": OPS_ALERT,
@@ -294,7 +298,9 @@ const out = { errors: {}, overflow: {} };
       const u = new URL(req.url());
       if (u.hostname !== 'localhost') return route.fulfill({ contentType: 'text/css', body: '' });
       if (req.resourceType() === 'document') {
-        return route.fulfill({ contentType: 'text/html', body: fs.readFileSync(path.join(DIR, name + '.html'), 'utf8') });
+        // a link or a redirect to «فحص النشر» (?tab=publish) gets that section; anything else the page asked for
+        const file = u.searchParams.get('tab') === 'publish' ? 'health_publish' : name;
+        return route.fulfill({ contentType: 'text/html', body: fs.readFileSync(path.join(DIR, file + '.html'), 'utf8') });
       }
       const file = path.join(PUB, u.pathname);
       if (/^\/(css|js)\//.test(u.pathname) && fs.existsSync(file)) {
@@ -303,8 +309,9 @@ const out = { errors: {}, overflow: {} };
       if (API[name][u.pathname]) return route.fulfill({ json: API[name][u.pathname] });
       return route.fulfill({ json: { status: 'success' } });
     });
-    await page.goto('http://localhost/system-diagnostics' + (hash || ''));
-    await page.waitForSelector('[data-health="now"]:not([data-state="checking"])', { timeout: 5000 });
+    await page.goto('http://localhost/system' + (hash || ''));
+    if (hash) await page.waitForURL(/tab=publish/, { timeout: 5000 });
+    else await page.waitForSelector('[data-health="now"]:not([data-state="checking"])', { timeout: 5000 });
     await page.waitForTimeout(300);
     out.overflow[`${name}@${width}`] = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth);
     return { page, ctx };
@@ -315,26 +322,26 @@ const out = { errors: {}, overflow: {} };
     title: document.querySelector('[data-health="now-title"]').textContent,
     items: [...document.querySelectorAll('[data-health="now-items"] li')].map(li => [li.getAttribute('data-item'),
       li.querySelector('.lq-health-todo__fix').textContent]),
-    open: document.querySelector('[data-health="advanced"]').open }));
+    advanced: !!document.querySelector('[data-health="advanced"]') }));
   for (const width of [1440, 390]) {
     {
       const { page, ctx } = await open('health_ok', width);
       out[`ok@${width}`] = await top(page);
       await shot(page, `health_ok_${width}.png`, true);
-      await page.click('[data-health="advanced"] > summary');
-      await page.waitForTimeout(400);
-      await shot(page, `health_ok_advanced_${width}.png`, true);
-      out[`okOpened@${width}`] = await page.evaluate(() => document.querySelector('[data-health="advanced"]').open);
+      // the rail: «الحالة» first, the open section marked
+      out[`rail@${width}`] = await page.evaluate(() => [[...document.querySelectorAll('[data-system-tab]')].map(a => a.getAttribute('data-system-tab')).slice(0, 3),
+        document.querySelector('[data-system-tab][aria-current="page"]').getAttribute('data-system-tab')]);
       await ctx.close();
     }
     {
       const { page, ctx } = await open('health_attention', width);
       out[`attention@${width}`] = await top(page);
       await shot(page, `health_attention_${width}.png`, true);
-      // the rehearsal's fix: the section opens on «فحص النشر» with the focus on its button
+      // the rehearsal's fix: a link to «أدوات» › «فحص النشر», which lands with the focus on its button
       await page.click('[data-health-goto="publish-check"]');
+      await page.waitForURL(/tab=publish/, { timeout: 5000 });
       await page.waitForTimeout(800);
-      out[`goto@${width}`] = await page.evaluate(() => [document.querySelector('[data-health="advanced"]').open,
+      out[`goto@${width}`] = await page.evaluate(() => [location.search,
         document.activeElement && document.activeElement.getAttribute('data-health'),
         Math.round(document.getElementById('publish-check').getBoundingClientRect().top)]);
       await shot(page, `health_attention_fix_${width}.png`);
@@ -342,9 +349,10 @@ const out = { errors: {}, overflow: {} };
     }
   }
   {
-    // the review screen's link to the rehearsal still lands on it
+    // an old link to the rehearsal (/system-diagnostics#publish-check -> /system#publish-check) moves to its section
     const { page, ctx } = await open('health_attention', 1440, '#publish-check');
-    out.hash = await page.evaluate(() => [document.querySelector('[data-health="advanced"]').open,
+    await page.waitForTimeout(800);
+    out.hash = await page.evaluate(() => [location.search + location.hash,
       document.activeElement && document.activeElement.getAttribute('data-health')]);
     await ctx.close();
   }
@@ -374,16 +382,16 @@ def test_the_health_page_in_a_browser(health_app, aside_results, tmp_path):
     assert all(v <= 0 for v in out["overflow"].values()), out["overflow"]
     for width in (1440, 390):
         ok = out[f"ok@{width}"]
-        assert (ok["state"], ok["title"], ok["items"], ok["open"]) == ("ok", "كلشي تمام", [], False)
-        assert out[f"okOpened@{width}"] is True
+        assert (ok["state"], ok["title"], ok["items"], ok["advanced"]) == ("ok", "كلشي تمام", [], False)
+        assert out[f"rail@{width}"] == [["status", "search", "logs"], "status"]
         trouble = out[f"attention@{width}"]
-        assert trouble["state"] == "attention" and trouble["title"] == "شو بدو منك" and trouble["open"] is False
+        assert trouble["state"] == "attention" and trouble["title"] == "شو بدو منك" and trouble["advanced"] is False
         keys = [k for k, _ in trouble["items"]]
         assert {"ops_serper_credit", "outbox", "publish"} <= set(keys), keys
         assert dict(trouble["items"])["publish"] == "افحص النشر"
-        opened, focused, card_top = out[f"goto@{width}"]
-        assert opened is True and focused == "publish-run" and card_top < 900
-    assert out["hash"] == [True, "publish-run"]
-    for name in ("health_ok", "health_ok_advanced", "health_attention", "health_attention_fix"):
+        search, focused, card_top = out[f"goto@{width}"]
+        assert search == "?tab=publish&goto=publish-check" and focused == "publish-run" and card_top < 900
+    assert out["hash"] == ["?tab=publish#publish-check", "publish-run"]
+    for name in ("health_ok", "health_attention", "health_attention_fix"):
         for width in (1440, 390):
             assert (shots / f"{name}_{width}.png").stat().st_size > 1000, (name, width)

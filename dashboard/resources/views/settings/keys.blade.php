@@ -38,7 +38,7 @@
                     @endif
                 </span>
                 @if ($row['id'] === 'google_sheet')
-                    <x-lq.button variant="secondary" size="sm" class="lq-keys__change" :href="route('dashboard.settings') . '?tab=sheet'">تغيير</x-lq.button>
+                    <x-lq.button variant="secondary" size="sm" class="lq-keys__change" :href="route('dashboard.system', ['tab' => 'sheet'])">تغيير</x-lq.button>
                 @else
                     <x-lq.button variant="secondary" size="sm" class="lq-keys__change" aria-expanded="false" aria-controls="lq-key-form-{{ $row['id'] }}" data-key-toggle="{{ $row['id'] }}" :disabled="(bool) $dbError">تغيير</x-lq.button>
                     <form class="lq-keys__form" id="lq-key-form-{{ $row['id'] }}" method="POST" action="{{ route('dashboard.save_settings') }}" autocomplete="off" data-key-form="{{ $row['id'] }}" data-key-name="{{ $row['name'] }}" hidden>

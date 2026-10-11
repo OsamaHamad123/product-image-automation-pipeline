@@ -243,30 +243,34 @@ console.log(JSON.stringify(out));
 
 
 # ---------------------------------------------------------------------------
-# Page headers, Health's «روح على», «التقدّم محفوظ» once
+# Page headers, no «روح على» on Health, «التقدّم محفوظ» once
 # ---------------------------------------------------------------------------
 
 def test_health_and_setup_use_the_page_header_component():
+    # Health and Setup are sections of «النظام»: one page header there, a section head in each partial
+    system = read(PAGES / "system.blade.php")
+    assert system.count("<x-lq.page-header") == 1 and 'title="النظام"' in system
     for view in (DIAG, SETUP):
         text = read(view)
-        assert "<x-lq.page-header" in text and '<header class="lq-page-header' not in text, view.name
+        assert "<x-lq.page-header" not in text and '<header class="lq-page-header' not in text, view.name
     setup = read(SETUP)
-    assert "<x-slot:actions>" in setup and 'data-setup="progress"' in setup
+    assert '<h2 class="lq-section-title">جهّز لقطة</h2>' in setup and 'data-setup="progress"' in setup
     index = read(INDEX)                     # Home: the eyebrow and the title carry home.js hooks the component lacks
     assert 'data-home="date"' in index and 'data-home="greeting"' in index
 
 
-def test_health_jump_links_sit_under_the_advanced_bar():
+def test_health_has_no_collapsed_section_and_no_jump_row():
+    # every former «تفاصيل متقدمة» card is on its own section of «النظام» (?tab=), so no «روح على» row either
     diag = read(DIAG)
-    assert diag.index('<details class="lq-health-advanced"') < diag.index("<x-lq.jump-links")
-    jump = diag[diag.index("<x-lq.jump-links"):]
-    for anchor in re.findall(r"\['#([a-z-]+)'", jump):
-        assert f'id="{anchor}"' in diag, anchor
-    assert diag.rindex("    </details>") < diag.index("<x-lq.jump-links")   # outside the section: never hidden
+    assert "lq-health-advanced" not in diag and "<x-lq.jump-links" not in diag
+    for card in ("services", "last-run", "lanes", "search-ops", "logs", "publish-check", "local-index", "eval-export",
+                 "reprocess"):
+        assert f'id="{card}"' in diag, card
 
 
 def test_progress_is_kept_is_said_once():
     texts = read(SETUP) + read(HOME_CARD)
     assert texts.count("التقدّم محفوظ") == 1
     header = read(SETUP)
-    assert "التقدّم محفوظ" in header[header.index("<x-lq.page-header"):header.index("</x-lq.page-header>")]
+    head = header[header.index('<div class="lq-setup__head">'):header.index('data-setup="progress"')]
+    assert "التقدّم محفوظ" in head                                      # the section's head, under «النظام»

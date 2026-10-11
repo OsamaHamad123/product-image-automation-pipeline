@@ -42,7 +42,7 @@
     {{ $fieldError('auto_publish_enabled') }}
 
     @if ($ap['status'] === 'error')
-        <x-lq.alert variant="danger" title="ما قدرنا نحسب دقة الماركات:" :action-href="route('dashboard.settings') . '?tab=auto-publish'" action-label="جرّب مرة تانية">ما قدرنا نوصل لبيانات النظام، فالتفعيل موقّف لحتى نقدر نتأكد. جرّب بعد شوي، وإذا ضل بلّغ المطوّر.</x-lq.alert>
+        <x-lq.alert variant="danger" title="ما قدرنا نحسب دقة الماركات:" :action-href="route('dashboard.system', ['tab' => 'auto-publish'])" action-label="جرّب مرة تانية">ما قدرنا نوصل لبيانات النظام، فالتفعيل موقّف لحتى نقدر نتأكد. جرّب بعد شوي، وإذا ضل بلّغ المطوّر.</x-lq.alert>
     @elseif (!$ap['enabled'] && !$ap['can_enable'])
         <p class="lq-autopub__hint">المفتاح بيتفعّل لما تفعّل ماركة جاهزة وحدة على الأقل من الجدول.</p>
     @endif

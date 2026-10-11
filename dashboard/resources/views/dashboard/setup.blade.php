@@ -1,5 +1,7 @@
 {{--
-    لقطة · «جهّز لقطة» (first-run setup wizard). SetupController::page renders it with:
+    لقطة · «جهّز لقطة» (first-run setup wizard): the «التجهيز» section of «النظام» (/system?tab=setup&step=…,
+    resources/views/dashboard/system.blade.php holds the page header, the rail and the scripts; /setup?step= redirects
+    there). SetupController::pageData gives it:
       $setup      SetupController::view(): {db, done, current, ready, progress {ok, total}, steps: [{key, n, title, lead, status,
                   label, tone, summary, rows: [{key, label, state, tone, fix, href, href_label}], skipped, ...}]}
       $active     the step on screen (?step=, else the first one that is not done)
@@ -10,41 +12,32 @@
     /api/system/publish-check and the first run POST /api/run-all with a row filter. public/js/setup.js; settings.js
     is loaded first for its sheet wording (window.LaqtaSettings).
 --}}
-@extends('layouts.laqta')
-
-@section('title', 'جهّز لقطة')
-@section('lq_nav', 'settings')
-@section('body_class', 'lq-page-setup')
-
-@push('styles')
-    <link rel="stylesheet" href="{{ asset('css/pages/setup.css') }}?v={{ @filemtime(public_path('css/pages/setup.css')) ?: '1' }}">
-@endpush
-
 @php
     $setupDots = ['success' => 'lq-dot--success', 'danger' => 'lq-dot--danger', 'warning' => 'lq-dot--warning', 'info' => 'lq-dot--info', 'muted' => 'lq-dot--muted'];
     $setupTotal = count($setup['steps']);
 @endphp
 
-@section('content')
 <div class="lq-setup" data-setup-page data-active="{{ $active }}">
-    <x-lq.page-header eyebrow="التجهيز لأول مرة" title="جهّز لقطة" :description="$setupTotal . ' خطوات قصيرة لتتأكد إنو كلشي جاهز قبل ما تشغّل الشيت كله. التقدّم محفوظ: فيك تطلع وترجع تكمّل من وين ما وقفت.'">
-        <x-slot:actions>
-            <span class="lq-setup__progress" data-setup="progress"><strong class="lq-num" data-setup="progress-ok">{{ $setup['progress']['ok'] }}</strong> من {{ $setupTotal }} خطوات تمام</span>
-        </x-slot:actions>
-    </x-lq.page-header>
+    <div class="lq-setup__head">
+        <div class="lq-setup__intro">
+            <h2 class="lq-section-title">جهّز لقطة</h2>
+            <p class="lq-setup__lead">{{ $setupTotal }} خطوات قصيرة لتتأكد إنو كلشي جاهز قبل ما تشغّل الشيت كله. التقدّم محفوظ: فيك تطلع وترجع تكمّل من وين ما وقفت.</p>
+        </div>
+        <span class="lq-setup__progress" data-setup="progress"><strong class="lq-num" data-setup="progress-ok">{{ $setup['progress']['ok'] }}</strong> من {{ $setupTotal }} خطوات تمام</span>
+    </div>
 
     @unless ($setup['db'])
         <x-lq.alert variant="danger" title="قاعدة البيانات مش متاحة:">التقدّم ما بينحفظ والفحوصات ما بتمشي هلق. شغّل قاعدة البيانات وحدّث الصفحة.</x-lq.alert>
     @endunless
     <div class="lq-alert lq-alert--success" role="status" data-setup="done-note" @unless ($setup['done']) hidden @endunless>
         <x-lq.icon name="check" :size="18" class="lq-alert__icon" />
-        <div class="lq-alert__body"><strong class="lq-alert__title">خلّصت التجهيز:</strong> الرئيسية ما عادت تذكّرك فيه. فيك ترجع لهون من الإعدادات بأي وقت.</div>
+        <div class="lq-alert__body"><strong class="lq-alert__title">خلّصت التجهيز:</strong> الرئيسية ما عادت تذكّرك فيه. فيك ترجع لهون من «النظام» بأي وقت.</div>
     </div>
 
     <ol class="lq-setup-steps" data-setup="stepper" aria-label="خطوات التجهيز">
         @foreach ($setup['steps'] as $step)
             <li class="lq-setup-steps__item">
-                <a class="lq-setup-steps__link" href="{{ route('dashboard.setup') }}?step={{ $step['key'] }}" data-setup-tab="{{ $step['key'] }}" data-status="{{ $step['status'] }}" @if ($step['key'] === $active) aria-current="step" @endif>
+                <a class="lq-setup-steps__link" href="{{ route('dashboard.system', ['tab' => 'setup', 'step' => $step['key']]) }}" data-setup-tab="{{ $step['key'] }}" data-status="{{ $step['status'] }}" @if ($step['key'] === $active) aria-current="step" @endif>
                     <span class="lq-setup-steps__n" aria-hidden="true">@if ($step['status'] === 'ok')<x-lq.icon name="check" :size="14" :stroke="2.6" />@else{{ $step['n'] }}@endif</span>
                     <span class="lq-setup-steps__text">
                         <span class="lq-setup-steps__title">{{ $step['title'] }}</span>
@@ -104,7 +97,7 @@
                         </form>
                         <div class="lq-setup-actions">
                             <x-lq.button variant="primary" icon="search" data-setup="sheet-check" :disabled="!$setup['db']"><span data-setup="sheet-check-label">افحص الشيت</span></x-lq.button>
-                            <a class="lq-link" href="{{ route('dashboard.settings') }}?tab=sheet">الإعدادات · ربط الشيت</a>
+                            <a class="lq-link" href="{{ route('dashboard.system', ['tab' => 'sheet']) }}">الإعدادات · ربط الشيت</a>
                         </div>
                         <p class="lq-setup-note" data-setup="sheet-status" role="status" aria-live="polite"></p>
                         @break
@@ -112,7 +105,7 @@
                     @case('keys')
                         <div class="lq-setup-actions">
                             <x-lq.button variant="primary" icon="refresh" data-setup="keys-test" :disabled="!$setup['db']"><span data-setup="keys-test-label">افحص المفاتيح</span></x-lq.button>
-                            <x-lq.button variant="secondary" icon="settings" :href="route('dashboard.settings') . '?tab=keys'">حطّ المفاتيح بالإعدادات</x-lq.button>
+                            <x-lq.button variant="secondary" icon="settings" :href="route('dashboard.system', ['tab' => 'keys'])">حطّ المفاتيح بالإعدادات</x-lq.button>
                         </div>
                         <p class="lq-setup-note">{{ $keysNote }}</p>
                         <details><summary class="lq-link">تفاصيل</summary><p class="lq-setup-note">قيمة المفتاح ما بتنعرض هون أبداً: بنقول بس إذا محفوظ وإذا اشتغل. الفحص بيستعمل Serper للبحث وPhotoRoom لعزل الخلفية.</p></details>
@@ -124,13 +117,13 @@
                             <x-lq.button variant="secondary" icon="store" :href="url($step['href'])">عبّي جدول الماركات</x-lq.button>
                         </div>
                         <p class="lq-setup-note">الفحص بيقرأ التبويب بس: ما بيكتب بالشيت وما بيكلّف شي.</p>
-                        <details><summary class="lq-link">تفاصيل</summary><p class="lq-setup-note">«عبّي جدول الماركات» بصفحة التشغيل بيقترح صف لكل ماركة ناقصة، وما بينكتب شي قبل ما تعتمده.</p></details>
+                        <details><summary class="lq-link">تفاصيل</summary><p class="lq-setup-note">«عبّي جدول الماركات» بـ«اليوم» بيقترح صف لكل ماركة ناقصة، وما بينكتب شي قبل ما تعتمده.</p></details>
                         @break
 
                     @case('publish')
                         <div class="lq-setup-actions">
                             <x-lq.button variant="primary" icon="play" data-setup="publish-run" :disabled="!$setup['db']"><span data-setup="publish-run-label">افحص النشر</span></x-lq.button>
-                            <a class="lq-link" href="{{ url($step['details_href']) }}">التفاصيل بصفحة الصحة</a>
+                            <a class="lq-link" href="{{ url($step['details_href']) }}">التفاصيل بـ«فحص النشر»</a>
                         </div>
                         <p class="lq-setup-note" data-setup="publish-meta">@if ($step['when'] !== '')آخر فحص للنشر: {{ $step['when'] }}@if ($step['sample'] !== '') · {{ $step['sample'] }}@endif. @endif ممكن يكلّف طلب عزل خلفية واحد وقراءة ملصق وحدة، وعادةً بيخلص بأقل من دقيقة.</p>
                         <details><summary class="lq-link">تفاصيل</summary><p class="lq-setup-note">الصورة التجريبية بتنرفع على Cloudinary وبتنمسح، وبالشيت منكتب عنوان عمود الرابط نفسه فوق حاله: ما منلمس منتجاتك. قراءة الملصق بـ Gemini إذا مفتاحها محفوظ.</p></details>
@@ -171,7 +164,7 @@
     <section class="lq-card lq-setup-ready" data-setup="ready" aria-labelledby="setup-ready-title" @if ($active !== 'ready') hidden @endif>
         <span class="lq-setup-ready__icon" aria-hidden="true"><x-lq.icon name="check" :size="22" :stroke="2.4" /></span>
         <h2 class="lq-setup-step__title" id="setup-ready-title" data-setup="ready-title">{{ $setup['ready'] ? 'لقطة جاهزة' : 'باقي خطوات' }}</h2>
-        <p class="lq-setup-step__lead" data-setup="ready-text">{{ $setup['ready'] ? 'كل الخطوات خلصت. راجع الصور اللي لقيناها، وبعدين شغّل الشيت كله من صفحة التشغيل.' : 'في خطوات لسا ما خلصت: فيك ترجعلها، أو تخلّص التجهيز هلق وتكمّلها بعدين من الإعدادات.' }}</p>
+        <p class="lq-setup-step__lead" data-setup="ready-text">{{ $setup['ready'] ? 'كل الخطوات خلصت. راجع الصور اللي لقيناها، وبعدين شغّل الشيت كله من «اليوم».' : 'في خطوات لسا ما خلصت: فيك ترجعلها، أو تخلّص التجهيز هلق وتكمّلها بعدين من الإعدادات.' }}</p>
         <div class="lq-setup-actions">
             <x-lq.button variant="primary" icon="check" data-setup="finish" :disabled="!$setup['db']">خلّصت التجهيز</x-lq.button>
             <x-lq.button variant="secondary" icon="review" :href="route('dashboard.catalog') . '?mode=bulk'">راجع الصور</x-lq.button>
@@ -182,9 +175,3 @@
 </div>
 
 <script type="application/json" id="lq-setup-initial">@json($setup)</script>
-@endsection
-
-@push('scripts')
-    <script src="{{ asset('js/settings.js') }}?v={{ @filemtime(public_path('js/settings.js')) ?: '1' }}"></script>
-    <script src="{{ asset('js/setup.js') }}?v={{ @filemtime(public_path('js/setup.js')) ?: '1' }}"></script>
-@endpush

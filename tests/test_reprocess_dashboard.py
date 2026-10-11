@@ -42,7 +42,7 @@ def script_module():
 # Static
 # ---------------------------------------------------------------------------
 
-def test_routes_and_the_card_inside_the_advanced_section():
+def test_routes_and_the_card_on_its_section():
     routes = read(ROUTES)
     c = "\\App\\Http\\Controllers\\RecutController"
     for line in (f"Route::post('/api/system/reprocess/plan', [{c}::class, 'plan']);",
@@ -50,16 +50,19 @@ def test_routes_and_the_card_inside_the_advanced_section():
                  f"Route::get('/api/system/reprocess', [{c}::class, 'batchStatus']);"):
         assert line in routes, line
     view = read(HEALTH_VIEW)
-    advanced = view[view.index('data-health="advanced"'):view.rindex("</details>")]
+    # «أدوات» › «إعادة القص» of «النظام» (?tab=recut): its own section of the health partial
+    advanced = view[view.index("@case('recut')"):view.index("@break", view.index("@case('recut')"))]
     for hook in ("reprocess", "reprocess-status", "reprocess-plan", "reprocess-plan-label", "reprocess-form",
                  "reprocess-max", "reprocess-usd", "reprocess-start"):
         assert f'data-health="{hook}"' in advanced, hook
     assert "صور قديمة بخلفية بيضا" in advanced and "بدون ما يغيّر شي" in advanced
-    # one card, in the advanced section («تفاصيل متقدمة» now holds every detailed card: wp/onboard)
-    assert advanced.count('data-health="reprocess"') == 1 and 'class="lq-card lq-card--compact lq-health-reprocess"' in advanced
+    # one card, a raised one (it holds the buttons), with its link to «فحص القص»
+    assert view.count('data-health="reprocess"') == 1 and 'class="lq-card lq-health-reprocess"' in advanced
+    assert "route('dashboard.catalog', ['mode' => 'cutout'])" in advanced
     js = read(HEALTH_JS)
     assert "function createReprocess(" in js and "'/api/system/reprocess/plan'" in js
-    assert len([line for line in view.splitlines() if "asset('js/" in line and ".js" in line]) == 1
+    system = read(HEALTH_VIEW.parent / "system.blade.php")
+    assert "asset('js/" not in view and system.count("asset('js/health.js')") == 1
     import cli_bridge
     assert cli_bridge.ACTIONS["reprocess_plan"] is cli_bridge.action_reprocess_plan
     assert cli_bridge.ACTIONS["reprocess_start"] is cli_bridge.action_reprocess_start
@@ -198,7 +201,7 @@ def calls_of(app):
 
 
 def test_opening_the_page_runs_nothing(reprocess_app):
-    (page,) = _kernel(reprocess_app["env"], [["GET", "/system-diagnostics", {}]])
+    (page,) = _kernel(reprocess_app["env"], [["GET", "/system?tab=recut", {}]])
     assert page["status"] == 200 and 'data-health="reprocess"' in page["body"]
     assert not [c for c in calls_of(reprocess_app) if c[0].startswith("reprocess")]
 

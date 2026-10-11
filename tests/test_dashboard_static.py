@@ -46,7 +46,7 @@ CHANGED_BLADES = [
     VIEWS / "dashboard" / "catalog.blade.php",
     VIEWS / "dashboard" / "index.blade.php",
     VIEWS / "dashboard" / "settings.blade.php",
-    VIEWS / "dashboard" / "diagnostics.blade.php",
+    VIEWS / "dashboard" / "system.blade.php",          # «النظام»: loads health.js, settings.js and setup.js
     VIEWS / "layouts" / "laqta.blade.php",
 ]
 

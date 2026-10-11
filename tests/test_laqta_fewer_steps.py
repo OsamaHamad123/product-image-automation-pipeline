@@ -3,11 +3,11 @@
 * «روح لـ…» (public/js/jump.js, the layout's #lqGotoIndex from App\\Services\\GotoIndex): Ctrl+K or «/» from any page,
   every page, card, setting and review list in one search; digits open that row, any text searches the review list
   (/catalog?q=…); a reviewer's list has none of the owner's pages;
-* «روح على» (components/lq/jump-links): the Health cards one click away; Health opens «تفاصيل متقدمة» for any
-  #id inside it (on load and on a hash change). «اليوم» has no jump row: its sheet tools are tabs (#run-brands …);
+* «روح على» (components/lq/jump-links): «النظام» needs none (each card is on its own section, ?tab=), and an
+  old Health #id link moves to the section that holds the card. «اليوم» has no jump row: its sheet tools are tabs;
 * «رجّع وشغّل» in the review list: the rows go back to the queue and the run panel opens on those rows only
   (?scope=rows&rows=…), «قبل ما تبدأ» prices them and «ابدأ» is the one click left;
-* the Health items for a key land on that key's row with its field open (?tab=keys#lq-key-serper);
+* the Health items for a key land on that key's row with its field open (/system?tab=keys#lq-key-serper);
 * the review list takes ?q= and searches SKU too; bulk mode has its own search; Enter approves a bulk card;
 * the home's next step says the failed rows and never sends a reviewer to the owner's pages.
 """
@@ -37,8 +37,8 @@ ENTRIES = r"""
 const entries = [
     { title: 'الرئيسية', group: 'صفحات', href: '/', words: 'home' },
     { title: 'باركودات من صفحات المتاجر', group: 'التشغيل', href: '/batch-automation#run-barcodes', words: 'barcode gtin' },
-    { title: 'مفتاح Serper', group: 'الإعدادات', href: '/settings?tab=keys#lq-key-serper', words: 'البحث عن الصور key api' },
-    { title: 'فحص النشر', group: 'الصحة والتكلفة', href: '/system-diagnostics#publish-check', words: 'publish' },
+    { title: 'مفتاح Serper', group: 'الإعدادات', href: '/system?tab=keys#lq-key-serper', words: 'البحث عن الصور key api' },
+    { title: 'فحص النشر', group: 'النظام', href: '/system?tab=publish#publish-check', words: 'publish' },
 ];
 """
 
@@ -57,11 +57,11 @@ console.log(JSON.stringify({
     text: G.search(entries, 'Almarai Laban').map(e => e.href),
 }));
 """)
-    assert out["empty"] == ["/", "/batch-automation#run-barcodes", "/settings?tab=keys#lq-key-serper",
-                            "/system-diagnostics#publish-check"]
-    assert out["english"][0] == "/settings?tab=keys#lq-key-serper"
+    assert out["empty"] == ["/", "/batch-automation#run-barcodes", "/system?tab=keys#lq-key-serper",
+                            "/system?tab=publish#publish-check"]
+    assert out["english"][0] == "/system?tab=keys#lq-key-serper"
     assert out["arabic"][0] == "/batch-automation#run-barcodes"
-    assert out["hamza"][0] == "/system-diagnostics#publish-check"
+    assert out["hamza"][0] == "/system?tab=publish#publish-check"
     assert out["words"][0] == "باركودات من صفحات المتاجر"
     # Arabic digits are a row number; the last entry always searches the review list
     assert out["row"][0] == "/catalog?row=12" and out["row"][-1] == "/catalog?q=%D9%A1%D9%A2"
@@ -111,15 +111,18 @@ console.log(JSON.stringify({ afterTyping, typingPrevented: typing.defaultPrevent
 
 def test_goto_index_lists_every_hidden_tool_and_marks_the_owners_ones():
     goto = read(GOTO)
-    for href in ("/catalog?mode=cutout", "/setup", "/#run-barcodes", "/#run-export", "/#run-brands", "/#run-new",
-                 "/system-diagnostics#search-ops", "/system-diagnostics#reprocess", "/system-diagnostics#eval-export",
+    for href in ("/catalog?mode=cutout", "/system?tab=setup", "/#run-barcodes", "/#run-export", "/#run-brands", "/#run-new",
+                 "/system?tab=search#search-ops", "/system?tab=recut#reprocess", "/system?tab=eval#eval-export",
                  "/catalog?filter=failed", "/catalog?mode=bulk"):
         assert f"'{href}'" in goto, href
-    for owner in ("'/catalog?mode=cutout', 'cutout recut background', true", "'/setup', 'setup wizard onboarding', true",
-                  "'/#run-current', 'run batch stop pause resume progress', true"):
+    for owner in ("'/catalog?mode=cutout', 'cutout recut background', true",
+                  "'/system?tab=setup', 'setup wizard onboarding', true",
+                  "'/#run-current', 'run batch stop pause resume progress', true",
+                  "'/system?tab=publish#publish-check', 'publish check cloudinary', true"):
         assert owner in goto
     assert "/batch-automation" not in goto                                      # it only redirects to «اليوم» now
-    assert "'/settings?tab=keys#lq-key-' . $id" in goto and "SettingsController::TABS" in goto
+    assert "'/system?tab=keys#lq-key-' . $id" in goto and "SettingsController::TABS" in goto
+    assert "/system-diagnostics" not in goto and "'/settings" not in goto and "'/setup'" not in goto
 
 
 @NEEDS_LARAVEL
@@ -133,10 +136,13 @@ def test_the_layout_carries_the_places_for_each_role(role_pages):
         found[role] = {e["href"] for e in _json.loads(island.group(1))}
         assert re.search(r'<script src="[^"]*/js/jump\.js\?v=\d+"></script>', page)
         assert 'data-lq-goto-open' in page
-    assert "/catalog?mode=cutout" in found["admin"] and "/settings?tab=keys#lq-key-serper" in found["admin"]
+    assert "/catalog?mode=cutout" in found["admin"] and "/system?tab=keys#lq-key-serper" in found["admin"]
     assert not any(h.startswith(("/batch-automation", "/#run-", "/settings", "/setup", "/catalog?mode=cutout", "/cutout-check")) for h in found["reviewer"])
     assert "/#run-brands" in found["admin"] and "/" in found["reviewer"]
-    assert "/system-diagnostics#eval-export" not in found["reviewer"] and "/catalog?filter=failed" in found["reviewer"]
+    # «النظام»: the reviewer's places are on «الحالة» only (status, search, logs)
+    system = [h for h in found["reviewer"] if h.startswith("/system")]
+    assert system and all(re.match(r"/system\?tab=(status|search|logs)(#|$)", h) for h in system), system
+    assert "/system?tab=eval#eval-export" not in found["reviewer"] and "/catalog?filter=failed" in found["reviewer"]
 
 
 # ---------------------------------------------------------------------------
@@ -144,11 +150,8 @@ def test_the_layout_carries_the_places_for_each_role(role_pages):
 # ---------------------------------------------------------------------------
 
 def test_long_pages_have_jump_links_to_cards_that_exist():
-    text = read(HEALTH_VIEW)
-    links = re.search(r"<x-lq\.jump-links[^>]*:links=\"\[(.*?)\]\"", text, re.S)
-    assert links, HEALTH_VIEW.name
-    for anchor in re.findall(r"\['#([a-z-]+)'", links.group(1)):
-        assert f'id="{anchor}"' in text, (HEALTH_VIEW.name, anchor)
+    # «النظام» has no «روح على» row: each card is on its own section
+    assert "x-lq.jump-links" not in read(HEALTH_VIEW)
     # «اليوم»: no «روح على» row (the sheet tools are tabs); every tool tab names a panel that exists
     today = read(RUN_VIEW)
     assert "<x-lq.jump-links" not in today
@@ -158,14 +161,15 @@ def test_long_pages_have_jump_links_to_cards_that_exist():
 
 def test_health_items_for_a_key_land_on_that_key_and_run_items_on_their_card():
     attention = read(ATTENTION)
-    assert "'href' => '/settings?tab=keys#lq-key-serper'" in attention
-    assert "'href' => '/settings?tab=keys#lq-key-gemini'" in attention
+    assert "'href' => '/system?tab=keys#lq-key-serper'" in attention
+    assert "'href' => '/system?tab=keys#lq-key-gemini'" in attention
     assert "'/batch-automation" not in attention
     assert "'href' => '/#run-new'" in attention and "'href' => '/#run-current'" in attention
     settings = read(DASH / "public" / "js" / "settings.js")
     assert "function openKeyFromHash()" in settings and "openKeyForm(m[1], true)" in settings
     health = read(DASH / "public" / "js" / "health.js")
-    assert "function revealHash(hash, scroll)" in health and "'hashchange'" in health
+    # an old /system-diagnostics#card link moves to the section that holds the card
+    assert "function cardTab(hash, currentTab)" in health and "window.location.replace(" in health
 
 
 # ---------------------------------------------------------------------------

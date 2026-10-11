@@ -8,7 +8,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 
 /**
- * «جهّز لقطة»: معالج التجهيز لأول مرة (GET /setup، resources/views/dashboard/setup.blade.php، public/js/setup.js).
+ * «جهّز لقطة»: معالج التجهيز لأول مرة (قسم setup بصفحة «النظام»: GET /system?tab=setup، resources/views/dashboard/setup.blade.php، public/js/setup.js).
  *
  * خمس خطوات، لكل وحدة فحص حي وتصليح واضح:
  *   1. sheet    ملف الاعتماد موجود، رابط الشيت وتبويبه محفوظين، والشيت بينقرا وفيه عمودي اسم المنتج والماركة. الحفظ
@@ -59,7 +59,7 @@ class SetupController extends Controller
     public const RUN_FAILED = ['failed', 'outage'];
 
     /** الرجوع لصفحة الإعدادات: مفاتيح وتبويب المعالجة. */
-    public const KEYS_HREF = '/settings?tab=keys';
+    public const KEYS_HREF = '/system?tab=keys';
     public const BRANDS_HREF = '/#run-brands';
 
     /** ملاحظة كلفة زر فحص المفاتيح (نفس فحص الاتصالات بصفحة الصحة). */
@@ -69,19 +69,22 @@ class SetupController extends Controller
     // Pages and endpoints
     // ------------------------------------------------------------------
 
-    /** GET /setup (?step=sheet|keys|brands|publish|run|ready): بيفتح على أول خطوة ناقصة إذا ما انطلبت خطوة. */
-    public function page(Request $request)
+    /**
+     * قسم «جهّز لقطة» بصفحة «النظام» (/system?tab=setup&step=sheet|keys|brands|publish|run|ready، SystemController::show؛
+     * /setup?step= بيحوّل لهون): بيفتح على أول خطوة ناقصة إذا ما انطلبت خطوة.
+     */
+    public static function pageData(Request $request): array
     {
         $facts = self::facts();
         $setup = self::view($facts);
         $asked = $request->query('step');
         $active = is_string($asked) && (isset(self::STEPS[$asked]) || $asked === 'ready') ? $asked : ($setup['current'] ?? 'ready');
-        return view('dashboard.setup', [
+        return [
             'setup' => $setup,
             'active' => $active,
             'sheet' => $facts['sheet'],
             'keysNote' => self::KEYS_TEST_NOTE,
-        ]);
+        ];
     }
 
     /** GET /api/setup/state: نفس بيانات الصفحة كـ JSON. */
@@ -595,7 +598,7 @@ class SetupController extends Controller
                 ? self::row('bg', 'عزل الخلفية · remove.bg', 'محفوظ بملف ‎.env (بيبين شغلو ببروفة النشر)', 'success')
                 : self::row('bg', 'عزل الخلفية · remove.bg', 'غير محفوظ', 'warning',
                     'مفتاح remove.bg بينحط بملف .env (REMOVE_BG_API_KEY)، أو رجّع طريقة العزل لـ PhotoRoom من «معالجة الصور».',
-                    '/settings?tab=processing', 'معالجة الصور');
+                    '/system?tab=processing', 'معالجة الصور');
             $any['todo'] = $any['todo'] || !$facts['removebg_key'];
         } elseif (in_array($method, ['rembg', 'grabcut'], true)) {
             $rows[] = self::row('bg', 'عزل الخلفية', 'محلي على هالجهاز: ما بدو مفتاح', 'success');
@@ -628,7 +631,7 @@ class SetupController extends Controller
         }
         if (($check['status'] ?? '') === 'fail') {
             $rows = [self::row('tab', 'تبويب «Brands Mapping»', 'ما قدرنا نقرأ الشيت', 'danger',
-                'كمّل خطوة «ربط الشيت» أول، وبعدين افحص من جديد.', '/setup?step=sheet', 'ربط الشيت')];
+                'كمّل خطوة «ربط الشيت» أول، وبعدين افحص من جديد.', '/system?tab=setup&step=sheet', 'ربط الشيت')];
             return self::step('brands', 'fail', 'ما قدرنا نفتح الشيت لنقرأ جدول الماركات.', $rows, $link);
         }
         $brands = (int) ($check['brands'] ?? 0);
@@ -644,7 +647,7 @@ class SetupController extends Controller
         }
         $ok = ($check['found'] ?? false) && $brands > 0;
         return self::step('brands', $ok ? 'ok' : 'todo', $ok ? 'جدول الماركات موجود وفيه ماركات.'
-            : 'جدول الماركات لسا فاضي: عبّيه مرة وحدة من صفحة التشغيل.', $rows, $link + ['brands' => $brands]);
+            : 'جدول الماركات لسا فاضي: عبّيه مرة وحدة من «اليوم».', $rows, $link + ['brands' => $brands]);
     }
 
     /** الخطوة 4: آخر «فحص النشر» (HealthController::publishCheckView): الخطوات الأربعة وشو لازم تعمل. */
@@ -662,7 +665,7 @@ class SetupController extends Controller
         };
         $summary = $view['state'] === 'never' ? 'لسا ما انعمل فحص للنشر.' : $view['summary'];
         return self::step('publish', $status, $summary, $rows, ['when' => $view['when'], 'sample' => $view['sample'],
-            'details_href' => '/system-diagnostics#publish-check']);
+            'details_href' => '/system?tab=publish#publish-check']);
     }
 
     /** الخطوة 5: أول تشغيل: بلّش؟ خلص؟ (آخر تقرير تشغيل، temp/nightly/last_report.json). */

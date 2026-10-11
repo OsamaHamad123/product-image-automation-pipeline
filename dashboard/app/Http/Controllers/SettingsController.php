@@ -79,7 +79,7 @@ class SettingsController extends Controller
     /** تأكيد «تجاوز عزل الخلفية» (صفحة الصحة وشاشة المراجعة): شو بيصير بعده. */
     public const BG_SKIP_CONFIRM = 'تجاوز عزل الخلفية؟ الصور اللي بتعتمدها من هلق (والنشر التلقائي من التشغيل الجاي) '
         . 'بتنتشر متل ما هي على لوحة بيضا بدون عزل خلفيتها: صورة خلفيتها مش بيضا بتبين خلفيتها بالشيت. ما بنعيد أي فحص '
-        . 'لحالنا، وفيك ترجّع عزل الخلفية من صفحة الصحة أو من الإعدادات (تبويب «معالجة الصور») بأي وقت.';
+        . 'لحالنا، وفيك ترجّع عزل الخلفية من «فحص النشر» أو من «معالجة الصور» بصفحة «النظام» بأي وقت.';
 
     /** طرق العزل المحلية المنزّلة (cli_bridge bg_methods، image_processor.local_methods_available): 6 ساعات. */
     public const LOCAL_METHODS_CACHE_KEY = 'laqta_bg_local_methods_v1';
@@ -209,9 +209,13 @@ class SettingsController extends Controller
         'LOCAL_INDEX_ENABLED', 'LOCAL_INDEX_MAX_PAGES', 'WORKER_CONCURRENCY', 'QUERY_NORMALIZER',
     ];
 
-    public function show(Request $request)
+    /**
+     * بيانات تبويب إعدادات بصفحة «النظام» (SystemController::show، resources/views/dashboard/settings.blade.php):
+     * GET /settings?tab= صار تحويل لـ /system?tab=…، والحفظ (POST /settings) بيرجع لهونيك على كرته.
+     */
+    public static function panelData(string $tab): array
     {
-        $tab = self::tabFrom($request->query('tab'));
+        $tab = self::tabFrom($tab);
         $dbError = null;
         $stored = self::stored($dbError);
         $data = [
@@ -229,7 +233,7 @@ class SettingsController extends Controller
 
         // without the database nothing but the sheet tab can be read truthfully: the page says so instead
         if ($stored === null && $tab !== 'sheet') {
-            return view('dashboard.settings', $data);
+            return $data;
         }
 
         switch ($tab) {
@@ -254,7 +258,7 @@ class SettingsController extends Controller
                 break;
         }
 
-        return view('dashboard.settings', $data);
+        return $data;
     }
 
     /**
@@ -1563,8 +1567,8 @@ class SettingsController extends Controller
     private static function back(string $tab, array $flash)
     {
         $anchor = self::anchorFor(self::field(request(), 'section'));
-        $response = redirect()->to(route('dashboard.settings') . '?tab=' . urlencode(self::tabFrom($tab))
-            . ($anchor !== '' ? '#' . $anchor : ''));
+        // على كرته بقسمه بـ«النظام»: /system?tab=…#id
+        $response = redirect()->to(url(SystemController::url(self::tabFrom($tab), [], $anchor)));
         foreach ($flash as $key => $value) {
             if ($value !== null && $value !== [] && $value !== '') {
                 $response = $response->with($key, $value);
@@ -1578,7 +1582,7 @@ class SettingsController extends Controller
         return match ($section) {
             'serper', 'gemini', 'photoroom', 'cloudinary', 'anthropic', 'serpapi' => $changes === []
                 ? 'ما تغيّر شي: الحقول الفاضية بتخلي المفتاح المحفوظ متل ما هو.'
-                : 'انحفظ. افحص الاتصالات من صفحة الصحة لتتأكد إنه شغّال.',
+                : 'انحفظ. افحص الاتصالات من «الحالة الآن» لتتأكد إنه شغّال.',
             'auto-publish' => ($changes['auto_publish_enabled'] ?? '') === 'true'
                 ? 'النشر الآلي شغّال للماركات المفعّلة.'
                 : 'النشر الآلي مطفأ: كل النتائج رح تستنى مراجعتك.',

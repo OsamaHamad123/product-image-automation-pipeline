@@ -1,7 +1,8 @@
 /*
- * لقطة · «جهّز لقطة» (resources/views/dashboard/setup.blade.php, SetupController).
+ * لقطة · «جهّز لقطة» (resources/views/dashboard/setup.blade.php, SetupController): the «التجهيز» section of «النظام»
+ * (/system?tab=setup&step=…; /setup?step= redirects there).
  *
- * Five steps, one on screen at a time (?step= follows it). The page starts from the server's state (#lq-setup-initial)
+ * Five steps, one on screen at a time (?tab=setup&step= follows it). The page starts from the server's state (#lq-setup-initial)
  * and checks nothing on its own: every live check is a button.
  * - ربط الشيت: «احفظ وافحص» saves through POST /api/sheet/save (the Settings validation, after the same question) and
  *   then checks; «افحص الشيت» checks the saved link only (POST /api/setup/check {step: 'sheet'}).
@@ -123,7 +124,7 @@
         if (ACTIVE_PHASES.indexOf(phase) !== -1) {
             var text = 'عم ندوّر: ' + count(run && run.processed) + ' من ' + count(run && run.total) + ' خلصوا.';
             if (phase === 'starting') text = 'عم نقرأ الشيت ونجهّز الصفوف…';
-            if (phase === 'paused') text = 'التشغيل موقّف مؤقتاً. كمّله من صفحة التشغيل.';
+            if (phase === 'paused') text = 'التشغيل موقّف مؤقتاً. كمّله من «اليوم».';
             if (phase === 'stopping') text = 'عم يوقف التشغيل…';
             return { known: true, active: true, text: text };
         }
@@ -558,7 +559,7 @@
         var readyText = $('ready-text');
         if (readyText) {
             readyText.textContent = data.ready
-                ? 'كل الخطوات خلصت. راجع الصور اللي لقيناها، وبعدين شغّل الشيت كله من صفحة التشغيل.'
+                ? 'كل الخطوات خلصت. راجع الصور اللي لقيناها، وبعدين شغّل الشيت كله من «اليوم».'
                 : 'في خطوات لسا ما خلصت: فيك ترجعلها، أو تخلّص التجهيز هلق وتكمّلها بعدين من الإعدادات.';
         }
     }
@@ -577,7 +578,7 @@
         }
         page.setAttribute('data-active', active);
         if (window.history && window.history.replaceState) {
-            window.history.replaceState(null, '', window.location.pathname + '?step=' + encodeURIComponent(active));
+            window.history.replaceState(null, '', window.location.pathname + '?tab=setup&step=' + encodeURIComponent(active));
         }
         if (focus) {
             var target = active === 'ready' ? $('ready') : sections[active];

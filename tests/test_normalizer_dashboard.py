@@ -59,11 +59,11 @@ def test_the_switch_renders_and_saves_only_gemini_or_off(app_env, monkeypatch):
     try:
         _sql(db, "DELETE FROM system_settings WHERE `key` = 'query_normalizer'")
         out = _kernel(env, [
-            ["GET", "/settings?tab=models", {}],
+            ["GET", "/system?tab=models", {}],
             ["POST", "/settings", {"section": "models", "verifier_primary": "gemini:gemini-3.1-flash-lite",
                                    "verifier_strong": "off", "verifier_monthly_budget_usd": "5",
                                    "query_normalizer": "off"}],
-            ["GET", "/settings?tab=models", {}],
+            ["GET", "/system?tab=models", {}],
         ])
         page = out[0]["body"]
         assert 'name="query_normalizer"' in page and "قراءة أسماء الشيت المختصرة" in page

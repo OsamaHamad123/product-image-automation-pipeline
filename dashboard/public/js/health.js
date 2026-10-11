@@ -1,5 +1,8 @@
 /*
- * لقطة · الصحة والتكلفة (resources/views/dashboard/diagnostics.blade.php).
+ * لقطة · أقسام الصحة بصفحة «النظام» (resources/views/dashboard/diagnostics.blade.php inside system.blade.php):
+ * status (شو بدو منك، الخدمات، آخر تشغيل، دقة الاقتراحات)، search (عمليات البحث)، logs (السجل)، publish (فحص النشر)،
+ * index (فهرس المتاجر)، eval (مجموعة اختبار)، recut (إعادة القص). Each section is its own page (?tab=), so every part
+ * below starts only when its card is on the page.
  *
  * - Service cards start from the saved result of the last connection check (#lq-health-initial). Opening the page
  *   never runs the check: only the «فحص الاتصالات الآن» button POSTs /api/system/run-diagnostics.
@@ -17,9 +20,12 @@
  *   runs, GET /api/system/local-index feeds the status line until the page reloads with the new numbers.
  * - The top of the page («كلشي تمام» / «شو بدو منك», HealthAttentionController) starts from #lq-health-attention-initial
  *   and is read again from GET /api/system/attention once «عمليات البحث» answered (provider outages come from it) and
- *   after a check, a rehearsal or a background-removal change. An item's button is a link, or data-health-goto: it
- *   opens «تفاصيل متقدمة» (collapsed by default) on the card that holds the fix and puts the focus on its button.
- *   A link to a card inside it (/system-diagnostics#publish-check) opens it too; the log is not polled while it is shut.
+ *   after a check, a rehearsal or a background-removal change. An item's button is a link to the section that holds
+ *   the fix (/system?tab=…&goto=…#card, SystemController::gotoHref) with data-health-goto: on that section already, a
+ *   click only brings the card into view and puts the focus on its button (GOTO); after the link, ?goto= does the same.
+ * - Old links (/system-diagnostics#id redirects to /system, the hash stays): a hash naming a card that now lives on
+ *   another section (CARD_TABS, SystemController::CARD_TABS) moves there (/system?tab=…#id) when the rail has it.
+ * - ?log=nightly (or goto=log-nightly) opens the nightly log tab.
  * The view functions are pure (node tests call them through window.LaqtaHealth); the DOM code below only sets
  * textContent and attributes, never HTML.
  */
@@ -459,7 +465,7 @@
         var alerts = alertsView(report);
         if (count(report.scanned) === 0) {
             return { kind: 'empty', alerts: alerts, title: 'ما في عمليات بحث بآخر 7 أيام',
-                text: 'أول ما تشغّل بحث من صفحة التشغيل، بتبيّن هون النتائج وردود المصادر والتكلفة.', action: true, note: '' };
+                text: 'أول ما تشغّل بحث من «اليوم»، بتبيّن هون النتائج وردود المصادر والتكلفة.', action: true, note: '' };
         }
         var w = isObject(report.windows) && isObject(report.windows[windowName]) ? report.windows[windowName] : {};
         var codes = Array.isArray(w.failure_codes) ? w.failure_codes : [];
@@ -488,7 +494,7 @@
         if (!payload.exists) {
             var why = kind === 'laravel' ? ' لوحة التحكم ما سجّلت ولا شي لهلق.'
                 : kind === 'nightly' ? ' التشغيل الليلي ما اشتغل لهلق (سجّله بـ scripts\\schedule_nightly.ps1).'
-                    : ' بيبلّش أول ما تشغّل بحث من صفحة التشغيل.';
+                    : ' بيبلّش أول ما تشغّل بحث من «اليوم».';
             return { kind: 'missing', text: 'لسا ما في سجل.' + why, lines: [], meta: '' };
         }
         var lines = (Array.isArray(payload.lines) ? payload.lines : []).map(function (line) {
@@ -705,9 +711,11 @@
             state.timer = deps.schedule(poll, LOG_POLL_MS);
         }
 
+        /* deps.skipOps / deps.skipLog: a section without «عمليات البحث» (and without «شو بدو منك») or without the log */
         function start() {
             showServices();
-            loadOps(false);
+            if (!deps.skipOps) loadOps(false);
+            if (deps.skipLog) return;
             loadLog();
             state.timer = deps.schedule(poll, LOG_POLL_MS);
         }
@@ -1140,7 +1148,7 @@
 
     var ATTENTION_URL = '/api/system/attention';
     var ATTENTION_STATES = ['ok', 'attention', 'checking'];
-    /* data-health-goto -> [the card to open on, the button to focus] inside «تفاصيل متقدمة» */
+    /* data-health-goto -> [the card to bring into view, the button to focus] on its section (SystemController::GOTO) */
     var GOTO = {
         services: ['#services', '[data-health="run-check"]'],
         'publish-check': ['#publish-check', '[data-health="publish-run"]'],
@@ -1148,6 +1156,19 @@
         'index-card': ['[data-health="index-card"]', '[data-health="index-refresh"]'],
         'log-nightly': ['#lq-health-log-title', '#tab-nightly']
     };
+    /* where each card of the old Health page lives now (SystemController::CARD_TABS): old #links move to its section */
+    var CARD_TABS = {
+        services: 'status', 'last-run': 'status', lanes: 'status',
+        'search-ops': 'search', logs: 'logs',
+        'publish-check': 'publish', 'local-index': 'index', 'eval-export': 'eval', reprocess: 'recut'
+    };
+
+    /* The section an old #card link belongs on, or '' when it is on this one already (or is no card of the old page). */
+    function cardTab(hash, currentTab) {
+        var id = String(hash || '').replace(/^#/, '');
+        var tab = Object.prototype.hasOwnProperty.call(CARD_TABS, id) ? CARD_TABS[id] : '';
+        return tab && tab !== currentTab ? tab : '';
+    }
 
     /* The top of the page from the endpoint's answer (or the embedded one), or null when it is not one. */
     function attentionView(data) {
@@ -1156,7 +1177,7 @@
             var action = isObject(item.action) ? item.action : {};
             return { key: String(item.key || ''), tone: String(item.tone || 'muted'), title: String(item.title || ''),
                 text: String(item.text || ''), action: { label: String(action.label || ''), href: String(action.href || ''),
-                    goto: String(action.goto || '') } };
+                    goto: String(action.goto || ''), admin: action.admin === true } };
         });
         return { state: data.state, title: String(data.title || ''), text: String(data.text || ''), items: items,
             note: String(data.note || ''), pending: data.pending === true };
@@ -1176,7 +1197,8 @@
     }
 
     var api = {
-        attentionView: attentionView, GOTO: GOTO, ATTENTION_URL: ATTENTION_URL, tabStep: tabStep,
+        attentionView: attentionView, GOTO: GOTO, CARD_TABS: CARD_TABS, cardTab: cardTab, ATTENTION_URL: ATTENTION_URL,
+        tabStep: tabStep,
         lanesView: lanesView, LANES: LANES,
         publishView: publishView, publishRunningView: publishRunningView, createPublishCheck: createPublishCheck,
         bgView: bgView, bgProblem: bgProblem, BG_SKIP_RE: BG_SKIP_RE, BG_METHOD_LABELS: BG_METHOD_LABELS,
@@ -1204,6 +1226,16 @@
     }
 
     var page = document.querySelector('[data-health-page]');
+    var currentTab = page.getAttribute('data-health-tab') || 'status';
+
+    // an old link to a card that now lives on another section (/system-diagnostics#card redirects to /system and the
+    // browser keeps the fragment): go to that section, when the rail has it (a reviewer has «الحالة» only: he stays)
+    var movedTo = window.location ? cardTab(window.location.hash, currentTab) : '';
+    if (movedTo && document.querySelector('[data-system-tab="' + movedTo + '"]') && window.location.replace) {
+        window.location.replace('/system?tab=' + encodeURIComponent(movedTo) + window.location.hash);
+        return;
+    }
+
     var DOTS = { success: 'lq-dot--success', danger: 'lq-dot--danger', warning: 'lq-dot--warning', info: 'lq-dot--info',
         muted: 'lq-dot--muted' };
 
@@ -1262,27 +1294,11 @@
         }
     }
 
-    // --- «كلشي تمام» / «شو بدو منك» and «تفاصيل متقدمة» ---------------------------
-    var advanced = $('advanced');
+    // --- «كلشي تمام» / «شو بدو منك» ------------------------------------------------
     var nowCard = $('now');
     /* The same paths as resources/views/components/lq/icon.blade.php (check, alert, refresh) */
     var NOW_ICON_PATHS = { ok: 'M5 12.5 10 17.5 19 7', attention: 'M12 4 2.5 20h19zM12 10v4.5M12 17.5v.5',
         checking: 'M20 11a8 8 0 1 0-2.3 5.7M20 5v6h-6' };
-
-    function openAdvanced() {
-        if (advanced && !advanced.open) advanced.open = true;
-    }
-
-    // a link to a card inside «تفاصيل متقدمة» (#publish-check from the review screen, «روح على», «روح لـ…») opens it
-    // first, then the card comes into view: on load, on a hash change, and on a «روح على» link clicked twice
-    function revealHash(hash, scroll) {
-        var id = String(hash || '').replace(/^#/, '');
-        var target = id ? document.getElementById(id) : null;
-        if (!target || !advanced || !advanced.contains(target)) return false;
-        openAdvanced();
-        if (scroll) scrollToCard(target);
-        return true;
-    }
 
     // a card into view: smooth, unless the system asks for less motion
     function scrollToCard(node) {
@@ -1290,29 +1306,36 @@
         var still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
         node.scrollIntoView({ block: 'start', behavior: still ? 'auto' : 'smooth' });
     }
-    revealHash(window.location && window.location.hash, true);
-    if (typeof window.addEventListener === 'function') window.addEventListener('hashchange', function () { revealHash(window.location.hash, true); });
-    page.addEventListener('click', function (e) {
-        var link = e.target && e.target.closest ? e.target.closest('.lq-jump__link') : null;
-        if (link && window.location && link.getAttribute('href') === window.location.hash) revealHash(window.location.hash, true);
-    });
-
-    /* An item's button: open the section on the card that holds the fix and put the focus on its button. */
+    /* An item's button on the section that holds the fix: the card into view and the focus on its button. false when
+       the card is not on this section (the item's link goes there). */
     function goTo(where) {
         if (where === 'reload') {
             window.location.reload();
-            return;
+            return true;
         }
         var spec = GOTO[where];
-        if (!spec) return;
-        openAdvanced();
-        var card = page.querySelector(spec[0]);
+        var card = spec ? page.querySelector(spec[0]) : null;
+        if (!card) return false;
         var button = page.querySelector(spec[1]);
         if (where === 'log-nightly' && button) button.click();
         if (where === 'bg-restore' && (!button || button.hasAttribute('hidden'))) button = page.querySelector(GOTO['publish-check'][1]);
         scrollToCard(card);
         if (button) button.focus({ preventScroll: true });
+        return true;
     }
+
+    // after an item's link (?goto=…) or a link to the nightly log (?log=nightly): the same, once the page has loaded
+    // (the browser's own jump to #card drops a focus given earlier)
+    function afterLoad(fn) {
+        var go = function () { window.setTimeout(fn, 0); };
+        if (document.readyState === 'complete') go();
+        else window.addEventListener('load', go);
+    }
+    var query = null;
+    try { query = new URLSearchParams(window.location.search || ''); } catch (e) { query = null; }
+    var askedGoto = query ? query.get('goto') || '' : '';
+    if (query && query.get('log') === 'nightly' && !askedGoto) askedGoto = 'log-nightly';
+    if (askedGoto && GOTO[askedGoto]) afterLoad(function () { goTo(askedGoto); });
 
     function nowIcon(state) {
         var ns = 'http://www.w3.org/2000/svg';
@@ -1358,6 +1381,8 @@
             if (item.action.href) {
                 fix = make('a', 'lq-btn lq-btn--secondary lq-btn--sm lq-health-todo__fix', item.action.label);
                 fix.setAttribute('href', item.action.href);
+                if (item.action.goto) fix.setAttribute('data-health-goto', item.action.goto);
+                if (item.action.admin) fix.setAttribute('data-lq-admin', '');
             } else {
                 fix = make('button', 'lq-btn lq-btn--secondary lq-btn--sm lq-health-todo__fix', item.action.label);
                 fix.setAttribute('type', 'button');
@@ -1385,16 +1410,12 @@
         }, function () {});
     }
 
+    // an item's fix: on its section already, only the focus moves (no reload); otherwise the link goes there
     page.addEventListener('click', function (e) {
+        if (e.defaultPrevented || e.button || e.metaKey || e.ctrlKey || e.shiftKey || e.altKey) return;
         var button = e.target && e.target.closest ? e.target.closest('[data-health-goto]') : null;
-        if (button) goTo(button.getAttribute('data-health-goto'));
+        if (button && goTo(button.getAttribute('data-health-goto'))) e.preventDefault();
     });
-    if (advanced) {
-        // the log is read only while the section is open (deps.isHidden); opening it reads it at once
-        advanced.addEventListener('toggle', function () {
-            if (advanced.open) controller.loadLog();
-        });
-    }
 
     function renderServices(views) {
         Object.keys(views).forEach(function (key) {
@@ -1468,7 +1489,7 @@
             if (a.text) body.appendChild(document.createTextNode(' ' + a.text));
             box.appendChild(body);
             var link = make('a', 'lq-alert__action', 'الإعدادات');
-            link.href = (page.getAttribute('data-settings-url') || '/settings') + '?tab=keys';
+            link.href = (page.getAttribute('data-settings-url') || '/system') + '?tab=keys';
             box.appendChild(link);
             holder.appendChild(box);
         });
@@ -1626,6 +1647,7 @@
     }
 
     var opsAnswered = false;
+    var opsGrid = $('ops');
     var controller = createController({
         initial: readInitial(),
         fetchJson: fetchJson,
@@ -1635,7 +1657,7 @@
         setChecking: setChecking,
         // the first answer of «عمليات البحث» (or its failure) lets the top say what ops-health says
         renderOps: function (view) {
-            renderOps(view);
+            if (opsGrid) renderOps(view);
             if (view.kind !== 'loading' && !opsAnswered) {
                 opsAnswered = true;
                 loadAttention();
@@ -1647,7 +1669,10 @@
         },
         now: function () { return Date.now(); },
         schedule: function (fn, ms) { return setTimeout(fn, ms); },
-        isHidden: function () { return document.hidden || (advanced !== null && !advanced.open); }
+        isHidden: function () { return document.hidden; },
+        // «عمليات البحث» is read on its section, and on status for «شو بدو منك» (provider outages); the log on its own
+        skipOps: !opsGrid && !nowCard,
+        skipLog: !logBody
     });
 
     if (runButton) {
@@ -1691,7 +1716,7 @@
         });
     }
     document.addEventListener('visibilitychange', function () {
-        if (!document.hidden) controller.loadLog();
+        if (!document.hidden && logBody) controller.loadLog();
     });
 
     controller.start();
@@ -1870,15 +1895,9 @@
         if (bgRestore) bgRestore.addEventListener('click', function () { publish.restoreBg(); });
         if (publishButton) {
             publishButton.addEventListener('click', function () { publish.run(); });
-            // from the review screen's failed approvals (/system-diagnostics#publish-check): the button is ready,
+            // from the review screen's failed approvals (/system?tab=publish#publish-check): the button is ready,
             // never pressed for the owner (the check may cost a background-removal call)
-            // (after the load: the browser's own jump to #publish-check drops a focus given earlier)
-            var afterLoad = function (fn) {
-                var go = function () { window.setTimeout(fn, 0); };
-                if (document.readyState === 'complete') go();
-                else window.addEventListener('load', go);
-            };
-            if (window.location && window.location.hash === '#publish-check') afterLoad(function () { publishButton.focus(); });
+            if (window.location && window.location.hash === '#publish-check' && !askedGoto) afterLoad(function () { publishButton.focus(); });
         }
     }
 
