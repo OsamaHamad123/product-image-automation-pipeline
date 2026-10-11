@@ -1158,7 +1158,8 @@ def pre_cache_product_candidates(task, worksheet=None, link_column_index=None, b
             _finish_task(task, "pending", message, failure_code="PROVIDER_DOWN", trace=trace)
             return "provider_down"
         _finish_task(task, "failed", message, failure_code=code, trace=trace)
-        local_cache_db.save_product_failure(barcode, name, brand, f"{code}: {message}", sku_key=sku_key)
+        local_cache_db.save_product_failure(barcode, name, brand, f"{code}: {message}", sku_key=sku_key,
+                                            **_sheet_kw(worksheet))
         print(f"[Pre-Cache] لا توجد صورة للصف {row_number}: {code}")
         return "failed"
 
@@ -1223,7 +1224,7 @@ def pre_cache_product_candidates(task, worksheet=None, link_column_index=None, b
         return "success"
     saved = local_cache_db.save_curation_candidates(
         row_number, name, brand, candidates, best.get("url"), sku_key=sku_key, run_id=uuid.uuid4().hex[:16],
-        identity=task)
+        identity=task, **_sheet_kw(worksheet))
     if not saved:
         _finish_task(task, "failed", "Could not save review candidates",
                      failure_code="CANDIDATE_SAVE_FAILED", trace=trace)
@@ -1310,7 +1311,8 @@ def process_single_product(prod, worksheet, link_column_index, brand_mappings=No
         candidates = collect_candidates(best, trace)
         if not local_cache_db.save_curation_candidates(row_num, name, brand, candidates, best.get("url"),
                                                        sku_key=sku_key, run_id=uuid.uuid4().hex[:16],
-                                                       identity=dict(payload, name=name, brand=brand)):
+                                                       identity=dict(payload, name=name, brand=brand),
+                                                       **_sheet_kw(worksheet)):
             config.log_and_fail(barcode, name, brand, "CANDIDATE_SAVE_FAILED: تعذر حفظ المرشحات.")
             return "failed"
         print(f"الصف {row_num}: المرشحات محفوظة للمراجعة ({why})؛ الشيت ما انكتب لحد الاعتماد.")
@@ -1389,6 +1391,34 @@ def _enqueue_failed(message, reason="enqueue_failed"):
                                            stop_requested=0)
     _release_starting_lock()
     sys.exit(1)
+
+
+SHEET_CHANGED_MESSAGE = ("الشيت تغيّر أثناء التشغيل: وقّفنا التشغيل وما رح نكتب شي بالشيت القديم ولا بالجديد من "
+                         "هالتشغيل. الصفوف اللي ما خلصت رجعت للانتظار؛ شغّل من جديد ليقرأ الشيت الجديد.")
+
+
+def _use_sheet(worksheet):
+    """
+    هوية الورقة التي فتحها هذا التشغيل (google_sheets.sheet_key): كل صف يكتبه (مرشحات، طابور، أخطاء) يُختم بها
+    (local_cache_db.use_sheet_key)، والصفوف القديمة بلا هوية تُختم مرة واحدة بعد الترقية (backfill_sheet_key).
+    """
+    key = google_sheets.sheet_key(worksheet)
+    local_cache_db.use_sheet_key(key)
+    if key:
+        local_cache_db.backfill_sheet_key(key)
+    return key
+
+
+def _sheet_kw(worksheet):
+    """{'sheet_key': <ورقة worksheet>} للكتّاب، أو {} إذا لم تُعرف (يختم local_cache_db بورقة التشغيل نفسه)."""
+    key = google_sheets.sheet_key(worksheet)
+    return {"sheet_key": key} if key else {}
+
+
+def _stop_writes_for_sheet_change():
+    """الشيت تغيّر في .env أثناء التشغيل: لا كتابة جديدة في أي شيت من هذه العملية."""
+    google_sheets.freeze_writes("الشيت تغيّر أثناء التشغيل")
+    print(f"[Worker] {SHEET_CHANGED_MESSAGE}")
 
 
 # الإدراج يسلّم التشغيل الذي أنشأه (run_id) للعامل التالي: التشغيل الليلي في العملية نفسها، ولوحة التحكم في عملية
@@ -1671,7 +1701,7 @@ def plan_queue_moves(sheet_keys, queue, whole_sheet=False):
     return moves
 
 
-def plan_enqueue(products, reprocess=False, brand_mappings=None, whole_sheet=False):
+def plan_enqueue(products, reprocess=False, brand_mappings=None, whole_sheet=False, sheet_key=None):
     """
     صفوف الشيت (بعد الفلاتر) -> (صفوف local_cache_db.add_many_to_queue، عدادات). المطابقة عند الإدراج:
     (a) صف بلا رابط نهائي ولمنتجه (sku_key أو المفتاح البديل) صورة معتمدة: مهمة كتابة الرابط (relink) بدل بحث جديد.
@@ -1687,6 +1717,8 @@ def plan_enqueue(products, reprocess=False, brand_mappings=None, whole_sheet=Fal
     منتج انتقل إلى رقم صف آخر (plan_queue_moves): stats['moves']، ينقلها local_cache_db.relocate_queue_rows قبل
     الإدراج فيحتفظ المنتج بحالته ومرشحاته بلا بحث جديد؛ وقرارات هذه الدالة تقرأ صف الطابور القديم للمنتج.
     whole_sheet: products هي كل صفوف الشيت (بلا فلتر)، فصف غير موجود فيها خرج من الشيت.
+    sheet_key: الورقة التي قُرئت منها الصفوف: صفوف الطابور لورقة أخرى (قبل تبديل الشيت) لا تُقرأ كحالة سابقة لهذه
+    الصفوف ولا تُنقل إليها، وكل صف ناتج يُختم بها.
     """
     from catalog_match.brand_index import build_index
     from catalog_match.identity import build_sku_spec
@@ -1696,6 +1728,8 @@ def plan_enqueue(products, reprocess=False, brand_mappings=None, whole_sheet=Fal
              "in_flight": 0, "index_changed": 0, "rekey": [], "moves": []}
     snapshot = local_cache_db.resolution_snapshot()
     queue = local_cache_db.queue_snapshot()
+    if sheet_key:
+        queue = {n: q for n, q in queue.items() if q.get("sheet_key") in (None, sheet_key)}
     gtin_sizes = _sizes_by_gtin(products)
     keyed = []
     for prod in products:
@@ -1801,7 +1835,7 @@ def plan_enqueue(products, reprocess=False, brand_mappings=None, whole_sheet=Fal
         rows.append(local_cache_db.queue_input(
             prod["row_number"], prod.get("barcode", ""), name, brand, prod.get("search_query") or default_query(name, brand),
             payload=e["payload"], sku_key=e["sku_key"], alt_sku_key=e["alt_key"], brand_fp=e["brand_fp"],
-            task_kind=e["task_kind"], review_only=e["review_only"], requeue_reason=e["reason"]))
+            task_kind=e["task_kind"], review_only=e["review_only"], requeue_reason=e["reason"], sheet_key=sheet_key))
     return rows, stats
 
 
@@ -1817,6 +1851,7 @@ def run_enqueue_mode():
     try:
         load_run_config()
         google_sheets.clear_cache()
+        sheet_setting = google_sheets.sheet_setting_snapshot()     # الشيت في .env عند البدء
         try:
             allowed_rows = parse_row_filter(config.ROW_FILTER)
         except ValueError:
@@ -1832,6 +1867,7 @@ def run_enqueue_mode():
         if not worksheet:
             _enqueue_failed(f"لم يُعثر على الشيت «{config.SPREADSHEET_NAME_OR_URL}». تحقق من الرابط واسم ورقة "
                             "العمل ومن مشاركة الشيت مع حساب الخدمة. لم يتغير الطابور.", reason="sheet_not_found")
+        sheet_key = _use_sheet(worksheet)
         products, _ = google_sheets.get_products(worksheet)
         products = products or []
         if not products:
@@ -1851,9 +1887,12 @@ def run_enqueue_mode():
                 and (not brand_filter or brand_filter in (prod.get("brand") or "").lower())]
     done = {"insert": 0, "keep": 0, "reset": 0}
     whole_sheet = allowed_rows is None and not brand_filter
+    if google_sheets.sheet_setting_changed(sheet_setting):
+        # صفوف الشيت القديم لا تدخل الطابور بعد ما صار الشيت غيره
+        _enqueue_failed(SHEET_CHANGED_MESSAGE, reason="sheet_changed")
     try:
         rows, stats = plan_enqueue(selected, reprocess=reprocess, brand_mappings=brand_mappings,
-                                   whole_sheet=whole_sheet)
+                                   whole_sheet=whole_sheet, sheet_key=sheet_key)
         if stats.get("moves"):
             # منتجات انتقلت صفوفها (أُدرج أو حُذف صف فوقها): تأخذ حالتها ومرشحاتها معها بدل بحث جديد.
             # فشل النقل يترك السلوك القديم (الإدراج يعيدها للانتظار) ولا يوقف الإدراج
@@ -2818,6 +2857,7 @@ def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
     print("=" * 60)
 
     load_run_config()
+    sheet_setting = google_sheets.sheet_setting_snapshot()   # الشيت في .env عند البدء: تغيّره يوقف التشغيل
     wire_strict_lane_readiness(True)
     local_cache_db.resume_automation()   # علم الإيقاف المؤقت القديم لا يمنع تشغيلاً جديداً
     started = time.monotonic()
@@ -2864,6 +2904,9 @@ def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
                 stop_reason = "sheet_not_found"
                 raise google_sheets.SheetConfigError(f"sheet not found: {config.SPREADSHEET_NAME_OR_URL}")
             link_column_index = google_sheets.find_link_column(worksheet)
+            sheet_key = _use_sheet(worksheet)
+            # مهام هذه الورقة فقط: مهمة شيت آخر (قبل تبديله) لا تُبحث ولا تُكتب هنا
+            sheet_scope = {"sheet_key": sheet_key} if sheet_key else {}
         except Exception as e:
             reason = _sheet_failure_reason(e)
             stop_reason = stop_reason or ("worker_error" if reason == "enqueue_failed" else reason)
@@ -2951,6 +2994,11 @@ def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
                     stop_reason = "provider_down"
                     print("[Worker] محركات البحث غير متاحة لعدة منتجات متتالية؛ إيقاف العامل وإبقاء الصفوف في الانتظار.")
                     break
+                if google_sheets.sheet_setting_changed(sheet_setting):
+                    # مثل طلب الإيقاف: لا مهمة جديدة، ولا كتابة بعد الآن (حتى من المنتجات الجارية)
+                    stop_reason = "sheet_changed"
+                    _stop_writes_for_sheet_change()
+                    break
                 try:
                     state = local_cache_db.get_automation_state()
                     if state.get("stop_requested") == 1:
@@ -2986,14 +3034,14 @@ def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
                             # إعادة التحقق تُخرج صفوفاً من المراجعة: فقط عندما يوشك العامل أن يسحب فعلاً
                             rechecks_prepared = True
                             rechecks_requeued = _prepare_verifier_rechecks(notice, run_id)
-                        task = local_cache_db.fetch_next_task(worker_id)
+                        task = local_cache_db.fetch_next_task(worker_id, **sheet_scope)
                         if task:
                             print(f"[Queue] سحب مهمة الصف {task['row_number']}.")
                             active.append(pool.submit(runner, task))
                             db_outage_since = None
                             last_beat = time.monotonic()
                             continue
-                    if not active and local_cache_db.count_open_tasks() == 0:
+                    if not active and local_cache_db.count_open_tasks(**sheet_scope) == 0:
                         print("[Worker] الطابور فارغ؛ خروج العامل.")
                         break
                     if not active and time.monotonic() - last_beat >= WAIT_HEARTBEAT_SECONDS:
@@ -3068,6 +3116,12 @@ def run_worker_mode(trigger="manual", report=True, deadline_ts=None):
                 if stop_reason in ("stopped", "shutdown"):
                     # يعيد أي صف بقي 'processing' إلى الانتظار، ويلغي طلب الإيقاف، ويضبط الحالة (مراجعة أو خامل)
                     local_cache_db.stop_run(worker_active=False)
+                elif stop_reason == "sheet_changed":
+                    # نفس طريق الإيقاف، مع تنبيه يقول السبب
+                    settled = local_cache_db.stop_run(worker_active=False) or {}
+                    final_notice = _merge_notices(f"SHEET_CHANGED: {SHEET_CHANGED_MESSAGE}", notice)
+                    local_cache_db.update_automation_state(status=settled.get("status") or "idle", current_product="",
+                                                           stop_requested=0, notice=final_notice)
                 elif stop_reason == "provider_down":
                     final_notice = _outage_notice(worker_id, run_seconds,
                                                   "PROVIDER_DOWN: search providers unavailable; remaining rows stay pending",

@@ -30,6 +30,32 @@ _load_env()
 SPREADSHEET_NAME_OR_URL = os.getenv("SPREADSHEET_NAME_OR_URL", "automation sheet")
 SPREADSHEET_TAB_NAME = os.getenv("SPREADSHEET_TAB_NAME", "")
 
+_SHEET_ENV_KEYS = ("SPREADSHEET_NAME_OR_URL", "SPREADSHEET_TAB_NAME")
+
+
+def env_sheet_setting(env_path=".env"):
+    """
+    الشيت والتبويب كما في ملف .env الآن (يُقرأ من القرص، لا من ذاكرة العملية): {SPREADSHEET_NAME_OR_URL,
+    SPREADSHEET_TAB_NAME}، والمفتاح الغائب من الملف غائب من الناتج. None إذا الملف غير موجود أو تعذرت قراءته.
+    تشغيل جارٍ يقارنه بما بدأ به: حفظ شيت آخر من الإعدادات (أو تعديل .env بالإيد) يوقف كتاباته.
+    """
+    env_file = os.path.join(os.path.dirname(os.path.abspath(__file__)), env_path)
+    try:
+        with open(env_file, "r", encoding="utf-8") as f:
+            lines = f.readlines()
+    except OSError:
+        return None
+    found = {}
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or "=" not in line:
+            continue
+        key, val = line.split("=", 1)
+        key = key.strip()
+        if key in _SHEET_ENV_KEYS:
+            found[key] = val.strip().strip('"').strip("'").strip()
+    return found
+
 
 # 3. إعدادات البحث عن الصور (Google Image Search)
 # للحصول على نتائج دقيقة ورسمية، أدخل بيانات Google Custom Search API أدناه.

@@ -127,7 +127,27 @@ def _open_sheet():
     worksheet = google_sheets.open_worksheet(client, config.SPREADSHEET_NAME_OR_URL)
     if not worksheet:
         raise RuntimeError(f"Sheet not found: {config.SPREADSHEET_NAME_OR_URL}")
+    # كل صف يكتبه هذا الأمر (مرشحات، طابور، أخطاء، طابور الكتابة) يُختم بالورقة التي فتحها
+    local_cache_db.use_sheet_key(google_sheets.sheet_key(worksheet))
     return worksheet
+
+
+SHEET_CHANGED_ERROR = ("The Google Sheet or its tab changed since this page was loaded; nothing was written. "
+                       "Reload the page and try again.")
+
+
+def _sheet_refusal(params):
+    """
+    الصفحة أرسلت sheet_key الشيت الذي عرضت صفوفه (من get_products) وصار الشيت المضبوط غيره: رفض بلا أي كتابة، كي لا
+    يُكتب اعتماد صف 19 من الشيت القديم في صف 19 من الجديد. بلا sheet_key في الطلب أو بلا هوية معروفة: لا رفض.
+    """
+    sent = _text(params, 'sheet_key')
+    if not sent:
+        return None
+    current = google_sheets.current_sheet_key()
+    if current and current != sent:
+        return {'status': 'failed', 'error_code': 'sheet_changed', 'error': SHEET_CHANGED_ERROR}
+    return None
 
 
 # ---------------------------------------------------------------------------
@@ -138,6 +158,9 @@ def action_get_products(params):
     try:
         worksheet = _open_sheet()
         products, _ = google_sheets.get_products(worksheet)
+        key = google_sheets.sheet_key(worksheet)
+        if key:
+            local_cache_db.backfill_sheet_key(key)      # مرة واحدة بعد الترقية: الصفوف القديمة تأخذ هذه الورقة
     except google_sheets.SheetTransientError:
         # ليس خطأ رابط أو مشاركة: Google رفض مؤقتاً (الحصة أو خطأ خادم) حتى بعد إعادة المحاولة
         return _failure('failed', "Google Sheets is temporarily unavailable (quota or a Google server error). "
@@ -173,8 +196,9 @@ def action_get_products(params):
         except Exception as e:
             logger.warning("تعذر حساب sku_key للصف %s: %s", prod.get("row_number"), e)
         prod["has_error"], prod["error_message"] = _row_failure(failures, prod)
-    # اسم التبويب الذي قُرئت منه الصفوف (open_worksheet فتحه، فلا طلب إضافي): صفحة التشغيل تعرضه من كاش هذه القراءة
-    return {'status': 'success', 'products': products, 'sheet_tab': _tab_title(worksheet)}
+    # اسم التبويب الذي قُرئت منه الصفوف (open_worksheet فتحه، فلا طلب إضافي): صفحة التشغيل تعرضه من كاش هذه القراءة.
+    # sheet_key: هوية الورقة نفسها ("<معرّف الملف>:<gid>")؛ لارافيل يعرض فقط صفوف قاعدة البيانات المختومة بها
+    return {'status': 'success', 'products': products, 'sheet_tab': _tab_title(worksheet), 'sheet_key': key}
 
 
 def _tab_title(worksheet):
@@ -1248,6 +1272,9 @@ def action_select_image(params):
     if not image_url.lower().startswith(("http://", "https://")):
         return {'status': 'failed', 'error': 'image_url must be an http(s) link', 'error_code': 'bad_image_url'}
     row_number = int(row_number)
+    refused = _sheet_refusal(params)
+    if refused:
+        return refused
     sku_key, barcode, problem = _identity_problem(params, row_number)
     if problem:
         return {'status': 'failed', 'error': problem}
@@ -1348,6 +1375,9 @@ def action_upload_manual_image(params):
     if not file_path or not row_number or not product_name:
         return {'status': 'failed', 'error': 'Missing parameters or local file path not found'}
     row_number = int(row_number)
+    refused = _sheet_refusal(params)
+    if refused:
+        return refused
     task = local_cache_db.get_task_by_row(row_number)
     if _product_changed(params, task):
         return {'status': 'failed', 'error': PRODUCT_CHANGED_ERROR}
