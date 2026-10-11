@@ -175,7 +175,7 @@ class RecutController extends Controller
                 'gallery' => url('/api/cutout/gallery'), 'try' => url('/api/cutout/try'),
                 'apply' => url('/api/cutout/apply'), 'discard' => url('/api/cutout/discard'),
                 'undo' => url('/api/cutout/undo'), 'review' => route('dashboard.catalog'),
-                'health' => route('dashboard.diagnostics'),
+                'health' => url(SystemController::url('recut', [], 'reprocess')),
             ],
             'flags' => self::FLAGS,
         ];

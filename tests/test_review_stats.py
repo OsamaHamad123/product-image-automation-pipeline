@@ -408,7 +408,7 @@ def test_page_no_longer_shows_fabricated_rules():
 def test_page_shows_the_review_stats():
     page = PAGE.read_text(encoding="utf-8")
     controller = CONTROLLER.read_text(encoding="utf-8")
-    show = controller[controller.index("public function show"):controller.index("public function save")]
+    show = controller[controller.index("public static function panelData"):controller.index("public function save")]
     assert "PythonBridge::run('review_stats')" in show
     # per brand: the reviewed suggestions, precision, Wilson lower bound and the status, from the bridge
     for key in ("$row['reviews']", "$row['precision']", "$row['lower_bound']", "$row['chip']"):

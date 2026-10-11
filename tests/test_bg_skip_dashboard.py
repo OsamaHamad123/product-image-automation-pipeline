@@ -43,7 +43,7 @@ REVIEW_PHP = CONTROLLERS / "ReviewController.php"
 ROUTES = DASH / "routes" / "web.php"
 VIEWS = DASH / "resources" / "views"
 HEALTH_VIEW = VIEWS / "dashboard" / "diagnostics.blade.php"
-RUN_VIEW = VIEWS / "dashboard" / "batch_automation.blade.php"
+RUN_VIEW = VIEWS / "dashboard" / "index.blade.php"            # «اليوم»: the run panel
 PROCESSING_VIEW = VIEWS / "settings" / "processing.blade.php"
 HEALTH_JS = DASH / "public" / "js" / "health.js"
 SETTINGS_JS = DASH / "public" / "js" / "settings.js"
@@ -114,7 +114,7 @@ def test_the_card_carries_the_box_its_hooks_and_the_confirm_text():
         assert words in confirm, words
     # the page and the bridge: opening the page reads the method from the database, it never runs anything
     page_body = read(HEALTH_PHP)
-    page_fn = page_body[page_body.index("public function page()"):page_body.index("public static function bgProblem(")]
+    page_fn = page_body[page_body.index("public static function pageData("):page_body.index("public static function bgProblem(")]
     assert "currentBgState()" in page_fn and "PythonBridge::run" not in page_fn
 
 
@@ -505,8 +505,8 @@ def test_the_endpoint_validates_and_stores_then_restores_the_previous_method(bg_
     skip, again, health, processing, restore = _kernel(env, [
         ["POST", "/api/settings/bg-method", {"method": " NONE "}],
         ["POST", "/api/settings/bg-method", {"method": "none"}],
-        ["GET", "/system-diagnostics", {}],
-        ["GET", "/settings?tab=processing", {}],
+        ["GET", "/system?tab=publish", {}],
+        ["GET", "/system?tab=processing", {}],
         ["POST", "/api/settings/bg-method", {"method": "photoroom"}],
     ])
     body = json.loads(skip["body"])
@@ -532,7 +532,7 @@ def test_a_failed_check_offers_the_skip_and_the_previous_method_is_remembered(bg
     db, env = bg_app["db"], bg_app["env"]
     _put(db, {"bg_removal_method": "remove_bg_api"})
     skip, health = _kernel(env, [["POST", "/api/settings/bg-method", {"method": "none"}],
-                                 ["GET", "/system-diagnostics", {}]])
+                                 ["GET", "/system?tab=publish", {}]])
     assert json.loads(skip["body"])["previous_label"] == "remove.bg"
     assert "رجّع عزل الخلفية (remove.bg)" in health["body"]
     # the settings form choosing «بدون عزل الخلفية» remembers the method too
@@ -558,10 +558,10 @@ def test_without_the_database_the_endpoint_says_so(bg_app):
 
 
 def test_the_run_page_says_which_tab_the_run_reads(bg_app):
-    (plain,) = _kernel(bg_app["env"], [["GET", "/batch-automation", {}]])
+    (plain,) = _kernel(bg_app["env"], [["GET", "/", {}]])
     assert plain["status"] == 200 and "التشغيل بيقرأ من" in plain["body"] and 'data-run="sheet-tab"' in plain["body"]
     (proposals,) = _kernel(dict(bg_app["env"], SPREADSHEET_TAB_NAME="منتجات جديدة مقترحة 2"),
-                           [["GET", "/batch-automation", {}]])
+                           [["GET", "/", {}]])
     body = proposals["body"]
     assert "التشغيل بيقرأ من تبويب «منتجات جديدة مقترحة 2»" in body and 'data-suspicious="true"' in body
     assert "إذا مش تبويب منتجاتك، اختار التبويب الصح من الإعدادات" in body

@@ -92,12 +92,12 @@ def test_a_refused_value_is_marked_on_its_field_and_still_flashed(settings_env):
     prices_out[SLUGS[2]] = "abc"
     speed, advanced, models_save, models = run(settings_env, [
         ["POST", "/settings", {"section": "speed", "worker_concurrency": "99"}],
-        ["GET", "/settings?tab=advanced"],
+        ["GET", "/system?tab=advanced"],
         ["POST", "/settings", {"section": "models", "verifier_primary": "gemini:gemini-3.1-flash-lite",
                                "verifier_strong": "off", "query_normalizer": "off",
                                "verifier_monthly_budget_usd": "lots", "price_input": prices_in,
                                "price_output": prices_out}],
-        ["GET", "/settings?tab=models"],
+        ["GET", "/system?tab=models"],
     ])
     assert speed["status"] == 302 and speed["location"].endswith("#lq-settings-speed")
     body = advanced["body"]
@@ -130,7 +130,7 @@ def test_a_refused_value_is_marked_on_its_field_and_still_flashed(settings_env):
     assert "aria-invalid" not in primary and 'aria-describedby="lq-models-primary-help"' in primary
     assert 'id="lq-models-primary-help"' in body
     # a page with nothing refused has no message and no mark
-    clean = run(settings_env, [["GET", "/settings?tab=models"]])[0]["body"]
+    clean = run(settings_env, [["GET", "/system?tab=models"]])[0]["body"]
     assert "data-settings-field-error" not in clean and 'aria-invalid="true"' not in control(clean, "verifier_monthly_budget_usd")
 
 
@@ -226,7 +226,7 @@ def test_views_point_controls_at_their_notes_and_send_the_index_to_health():
         assert models.count(f'id="{ident}"') >= 1, ident                   # and the note carries it
     assert models.count("'lq-models-prices-help', 'model_prices'") == 2     # both price inputs
     advanced = read(VIEWS / "settings" / "advanced.blade.php")
-    assert advanced.count("route('dashboard.diagnostics') }}#local-index") == 2
+    assert advanced.count("route('dashboard.system', ['tab' => 'index']) }}#local-index") == 2
     assert "حدّث الفهرس هلق" in advanced
     assert "للتحديث: <code" not in advanced                                  # no command line as the owner's way
     css = read(SETTINGS_CSS)

@@ -26,8 +26,8 @@
         retry: '/api/failures/retry',
         imageProxy: '/api/image-proxy',
         export: '/rich-catalog/export',
-        run: '/batch-automation',
-        publishCheck: '/system-diagnostics#publish-check',
+        run: '/',
+        publishCheck: '/system?tab=publish#publish-check',
         bgMethod: '/api/settings/bg-method',
         reviewLanes: '/api/system/review-lanes'
     };
@@ -1215,7 +1215,7 @@
         }
         if (S.urls.run) {        // فاضي للمراجع: صفحة التشغيل للمدير بس
             actions.push(el('a', { className: 'lq-btn lq-btn--secondary', href: `${S.urls.run}#run-brands`, text: 'صلّح الماركات الناقصة' }));
-            actions.push(el('a', { className: 'lq-btn lq-btn--secondary', href: S.urls.run, text: 'تشغيل جديد' }));
+            actions.push(el('a', { className: 'lq-btn lq-btn--secondary', href: `${S.urls.run}#run-new`, text: 'تشغيل جديد' }));
         }
         return el('div', { className: 'lq-empty rv-empty rv-done', id: 'rvDone' }, [
             el('span', { className: 'lq-empty__icon rv-done__icon' }, [icon('check', 24, 2.2)]),

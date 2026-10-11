@@ -48,15 +48,15 @@ def test_routes_hooks_and_one_script():
     assert f"Route::post('/api/system/eval-export', [{c}::class, 'exportEvalSet']);" in routes
     assert f"Route::get('/api/system/eval-export/{{file}}', [{c}::class, 'downloadEvalSet'])" in routes
     view, js = read(HEALTH_VIEW), read(HEALTH_JS)
-    # the export is a card of the Health page's advanced section («تفاصيل متقدمة», collapsed by default)
-    advanced = view[view.index('<details class="lq-health-advanced" data-health="advanced">'):view.rindex("</details>")]
-    assert '<span class="lq-health-advanced__label">تفاصيل متقدمة</span>' in advanced
+    # the export is its own section of «النظام» («أدوات» › «مجموعة اختبار», ?tab=eval)
+    advanced = view[view.index("@case('eval')"):view.index("@break", view.index("@case('eval')"))]
+    assert "'eval' => ['label' => 'مجموعة اختبار'" in read(HEALTH_VIEW.parents[3] / "app" / "Http" / "Controllers" / "SystemController.php")
     assert "صدّر مجموعة اختبار" in advanced and 'data-health="eval-card"' in advanced
     for hook in ("eval-export", "eval-export-status", "eval-export-label", "eval-export-link"):
         assert f'data-health="{hook}"' in view, hook
     assert "function evalExportView(" in js and "function createEvalExport(" in js
     assert "'/api/system/eval-export'" in js
-    assert [line for line in view.splitlines() if "asset('js/" in line and ".js" in line].__len__() == 1
+    assert "asset('js/" not in view and read(HEALTH_VIEW.parent / "system.blade.php").count("asset('js/health.js')") == 1
     import cli_bridge
     assert cli_bridge.ACTIONS["eval_export"] is cli_bridge.action_eval_export
     assert list(cli_bridge.ACTIONS)[-2:] == ["ops_health", "run_control"]
@@ -178,9 +178,9 @@ def eval_app(app_env, tmp_path):
     zip_file.unlink(missing_ok=True)
 
 
-def test_the_page_has_the_advanced_section_and_opening_it_runs_nothing(eval_app):
-    (page,) = _kernel(eval_app["env"], [["GET", "/system-diagnostics", {}]])
-    assert page["status"] == 200 and 'data-health="advanced"' in page["body"]
+def test_the_section_opens_and_opening_it_runs_nothing(eval_app):
+    (page,) = _kernel(eval_app["env"], [["GET", "/system?tab=eval", {}]])
+    assert page["status"] == 200 and 'data-health="eval-card"' in page["body"]
     assert "صدّر مجموعة اختبار" in page["body"] and "مجموعة اختبار من مراجعاتك" in page["body"]
     assert "eval_export" not in (eval_app["calls"].read_text(encoding="utf-8") if eval_app["calls"].exists() else "")
 

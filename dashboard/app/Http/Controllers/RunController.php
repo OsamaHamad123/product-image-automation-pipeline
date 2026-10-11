@@ -9,11 +9,11 @@ use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\DB;
 
 /**
- * لقطة · التشغيل (the Run page) and the live run data the Home page shares with it.
+ * لقطة · the «التشغيل» panel of «اليوم» (/) and its live run data (the old Run page, /batch-automation, redirects there).
  *
  * Read-only: starting, pausing, stopping and fixing a run stay in ApiController (runAll, pauseBatch,
  * resumeBatch, stopBatch, resetBatch); this controller only reads.
- *   GET /batch-automation          the page (?tab=review now opens the bulk review on /catalog)
+ *   GET /batch-automation          302 to «اليوم» (/) with its query (?tab=review still opens the bulk review on /catalog)
  *   GET /api/run/live              /api/batch-status plus the current (or last) run's summary and latest rows
  *   GET /api/run/plan              «قبل ما تبدأ»: what a new run would search, skip, cost and take
  * Every count comes from QueueStats, the same functions the sidebar badge and /api/batch-status use.
@@ -37,13 +37,11 @@ class RunController extends Controller
         if ($request->query('tab') === 'review') {
             return redirect('/catalog?mode=bulk');
         }
-        $live = self::snapshot();
-        return view('dashboard.batch_automation', [
-            'live' => $live,
-            'autoPublish' => self::autoPublishState(),
-            'sheetTab' => self::sheetTab(),
-            'lqReviewCount' => $live['batch']['ready_for_review'] ?? null,
-        ]);
+        // The Run page is now the «التشغيل» panel of «اليوم» (/): the query (?scope=rows&rows=…, ?scope=brand&brand=…)
+        // goes along for run.js linkedForm, and the browser keeps the #fragment (#run-brands …) across the redirect.
+        // The query as sent (getQueryString() would sort it); the target is always this app's own /.
+        $query = (string) $request->server->get('QUERY_STRING', '');
+        return redirect()->to(rtrim(url('/'), '/') . '/' . ($query !== '' ? '?' . $query : ''));
     }
 
     // ------------------------------------------------------------------

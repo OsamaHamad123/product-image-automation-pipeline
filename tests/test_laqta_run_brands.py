@@ -174,7 +174,7 @@ def test_the_routes_and_the_card_are_registered():
                  "Route::post('/api/run/brand-add-all', [RunController::class, 'brandAddAll']);"):
         assert line in routes
     assert "validateCsrfTokens" not in (DASH / "bootstrap" / "app.php").read_text(encoding="utf-8")
-    view = (DASH / "resources" / "views" / "dashboard" / "batch_automation.blade.php").read_text(encoding="utf-8")
+    view = (DASH / "resources" / "views" / "dashboard" / "index.blade.php").read_text(encoding="utf-8")
     for hook in ("brands", "brands-title", "brands-lead", "brands-list", "brands-foot", "brands-add-all", "brands-refresh",
                  "brands-error", "brands-done"):
         assert f'data-run="{hook}"' in view

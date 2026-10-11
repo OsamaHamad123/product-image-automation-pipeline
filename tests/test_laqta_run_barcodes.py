@@ -126,7 +126,7 @@ def test_the_routes_and_the_card_are_registered():
     for line in ("Route::get('/api/run/barcode-suggestions', [RunController::class, 'barcodeSuggestions']);",
                  "Route::post('/api/run/barcode-write', [RunController::class, 'barcodeWrite']);"):
         assert line in routes
-    view = (DASH / "resources" / "views" / "dashboard" / "batch_automation.blade.php").read_text(encoding="utf-8")
+    view = (DASH / "resources" / "views" / "dashboard" / "index.blade.php").read_text(encoding="utf-8")
     for hook in ("barcodes", "barcodes-title", "barcodes-lead", "barcodes-list", "barcodes-apart", "barcodes-foot",
                  "barcodes-write", "barcodes-count", "barcodes-refresh", "barcodes-error", "barcodes-done"):
         assert f'data-run="{hook}"' in view

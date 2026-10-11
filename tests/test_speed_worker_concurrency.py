@@ -154,9 +154,9 @@ def test_the_dashboard_saves_validates_and_shows_the_field(app_env):
     db, env = app_env["db"], app_env["env"]
     _put(db, {"worker_concurrency": "5"})
     out = _kernel(env, [
-        ["GET", "/settings?tab=advanced", {}],
+        ["GET", "/system?tab=advanced", {}],
         ["POST", "/settings", {"section": "speed", "worker_concurrency": "7"}],
-        ["GET", "/settings?tab=advanced", {}],
+        ["GET", "/system?tab=advanced", {}],
         ["POST", "/settings", {"section": "speed", "worker_concurrency": "9"}],
         ["POST", "/settings", {"section": "speed", "worker_concurrency": "0"}],
         ["POST", "/settings", {"section": "speed", "worker_concurrency": "abc"}],
@@ -183,6 +183,6 @@ def test_a_refused_value_keeps_the_saved_one(app_env):
     _kernel(env, [["POST", "/settings", {"section": "speed", "worker_concurrency": "12"}],
                   ["POST", "/settings", {"section": "speed", "worker_concurrency": ""}]])
     assert _settings(db)["worker_concurrency"] == "6"
-    page = _kernel(env, [["GET", "/settings?tab=advanced", {}]])[0]["body"]
+    page = _kernel(env, [["GET", "/system?tab=advanced", {}]])[0]["body"]
     assert re.search(r'name="worker_concurrency"[^>]*value="6"', page)
 

@@ -65,8 +65,10 @@ def test_the_pages_deep_link_and_carry_the_shops_zone(mariadb_or_skip, tmp_path)
     env, _ = stub_env(tmp_path)
     plain, single, eligible, strict, home, run = kernel(env, [
         ["GET", "/catalog"], ["GET", "/catalog?mode=single"], ["GET", "/catalog?filter=eligible"],
-        ["GET", "/catalog?mode=bulk&filter=strict"], ["GET", "/"], ["GET", "/batch-automation"]])
-    for page in (plain, home, run):
+        ["GET", "/catalog?mode=bulk&filter=strict"], ["GET", "/"], ["GET", "/batch-automation?scope=rows&rows=5-7"]])
+    # the Run page is the run panel of «اليوم» now: its old address keeps the query on the way there
+    assert run["status"] == 302 and run["location"].endswith("/?scope=rows&rows=5-7")
+    for page in (plain, home):
         assert page["status"] == 200, page["body"][:2000]
         assert 'data-lq-tz="Asia/Dubai"' in page["body"]
     cfg = _config_of(plain["body"])
@@ -82,7 +84,6 @@ def test_the_pages_deep_link_and_carry_the_shops_zone(mariadb_or_skip, tmp_path)
     assert re.search(r'href="[^"]*/catalog\?mode=bulk" data-home="review-link"', body)
     assert 'data-home="next"' in body and 'data-home="next-action"' in body
 
-    body = run["body"]
     assert 'data-run="review-now"' in body and re.search(r'href="[^"]*/catalog\?mode=bulk" data-run="review-now"', body)
     assert 'data-run="notify"' in body and 'id="run-brands"' in body
     assert "ماركات ناقصة من جدول الماركات" in body

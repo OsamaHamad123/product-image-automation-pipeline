@@ -5,7 +5,7 @@
     <x-lq.run-card live />
     <x-lq.run-card state="running" text="الصفوف 62–101" count="24 / 40" :progress="60" />
     state: loading | idle | running | paused | error | unknown
-    :link="false" leaves out the link to the Run page (a reviewer can't open it: ReviewerLimits)
+    :link="false" leaves out the link to the run panel on «اليوم» (a reviewer has none)
 --}}
 @props([
     'live' => false,
@@ -18,21 +18,21 @@
 ])
 @php
     $lqStates = [
-        'loading' => ['label' => 'لحظة…', 'text' => 'لحظة، عم نقرأ حالة التشغيل…', 'link' => 'صفحة التشغيل ←'],
+        'loading' => ['label' => 'لحظة…', 'text' => 'لحظة، عم نقرأ حالة التشغيل…', 'link' => 'التشغيل ←'],
         'idle' => ['label' => 'جاهز', 'text' => 'ما في تشغيل هلق', 'link' => 'ابدأ تشغيل جديد ←'],
         'running' => ['label' => 'يعمل', 'text' => 'عم نجهّز التشغيل…', 'link' => 'عرض التفاصيل ←'],
         'paused' => ['label' => 'متوقف مؤقتاً', 'text' => 'التشغيل متوقف مؤقتاً', 'link' => 'عرض التفاصيل ←'],
         'stopping' => ['label' => 'عم يوقف', 'text' => 'بيكمّل المنتج الحالي وبيوقف', 'link' => 'عرض التفاصيل ←'],
         'error' => ['label' => 'توقف بعطل', 'text' => 'توقف التشغيل بسبب عطل.', 'link' => 'عرض التفاصيل ←'],
-        'stuck' => ['label' => 'عالق', 'text' => 'التشغيل عالق', 'link' => 'صفحة التشغيل ←'],
-        'unknown' => ['label' => 'غير معروف', 'text' => 'تعذّر قراءة حالة التشغيل', 'link' => 'صفحة التشغيل ←'],
+        'stuck' => ['label' => 'عالق', 'text' => 'التشغيل عالق', 'link' => 'التشغيل ←'],
+        'unknown' => ['label' => 'غير معروف', 'text' => 'تعذّر قراءة حالة التشغيل', 'link' => 'التشغيل ←'],
     ];
     $lqState = array_key_exists($state, $lqStates) ? $state : 'idle';
     $lqCopy = $lqStates[$lqState];
     $lqText = $text !== null && $text !== '' ? $text : $lqCopy['text'];
     $lqCount = $count !== null && $count !== '' ? (string) $count : null;
     $lqPct = is_numeric($progress) ? max(0, min(100, round((float) $progress))) : null;
-    $lqHref = $href ?? route('dashboard.batch_automation');
+    $lqHref = $href ?? route('dashboard.index') . '#run-current';     // «اليوم»: the «التشغيل الحالي» card
 @endphp
 <section {{ $attributes->class(['lq-runcard']) }} data-state="{{ $lqState }}" aria-label="التشغيل الحالي" @if ($live) data-lq-runcard @endif>
     <div class="lq-runcard__head">

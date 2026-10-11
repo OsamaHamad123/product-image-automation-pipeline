@@ -16,5 +16,5 @@
             @endforeach
         </ol>
     </div>
-    <a class="lq-btn lq-btn--primary lq-home-setup__go" href="{{ route('dashboard.setup') }}">{{ $setupCard['started'] ? 'كمّل التجهيز' : 'ابدأ التجهيز' }}<x-lq.icon name="arrow-left" :size="18" :stroke="2" /></a>
+    <a class="lq-btn lq-btn--primary lq-home-setup__go" href="{{ route('dashboard.system', ['tab' => 'setup']) }}">{{ $setupCard['started'] ? 'كمّل التجهيز' : 'ابدأ التجهيز' }}<x-lq.icon name="arrow-left" :size="18" :stroke="2" /></a>
 </section>

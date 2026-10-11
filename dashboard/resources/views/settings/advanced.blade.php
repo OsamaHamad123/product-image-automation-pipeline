@@ -8,7 +8,7 @@
     SerpApi key is saved (the key itself is on the «المفاتيح» tab). It also switches the local catalog index
     (catalog_match/local_index.py) and says what the index holds ($advanced['local_index'] =
     SettingsController::localIndexStats(), null before scripts/build_catalog_index.py first ran). Building / refreshing it is
-    a link to Health's «حدّث الفهرس هلق» (/system-diagnostics#local-index); the command line stays a developer detail.
+    a link to Health's «حدّث الفهرس هلق» (/system?tab=index#local-index); the command line stays a developer detail.
 --}}
 @php $adv = $advanced; $src = $advanced['sources']; $spd = $advanced['speed']; $idx = $advanced['local_index'] ?? null; @endphp
 {{-- «السرعة»: section=speed, $advanced['speed'] = SettingsController::speedData(). WORKER_CONCURRENCY, 1..8 (also checked server side). --}}
@@ -67,9 +67,9 @@
             <span class="lq-field__hint">قراءة الصفحة مجانية، واللي فيها (الصورة والاسم والباركود) بينحفظ 30 يوم. 0 = الفهرس موقف.</span>
         </label>
         @if ($idx === null)
-            <p class="lq-settings-card__note" data-local-index-status>الفهرس لسا ما انبنى، فهو موقف فعلياً. ابنيه بزر «حدّث الفهرس هلق» من <a class="lq-link" href="{{ route('dashboard.diagnostics') }}#local-index">الصحة › فهرس المتاجر المحلي</a>. <span class="lq-settings-card__tech">للمطوّر: <code dir="ltr">python scripts/build_catalog_index.py --discover</code> بيفحص خرايط المتاجر بدون ما يكتب شي.</span></p>
+            <p class="lq-settings-card__note" data-local-index-status>الفهرس لسا ما انبنى، فهو موقف فعلياً. ابنيه بزر «حدّث الفهرس هلق» من <a class="lq-link" href="{{ route('dashboard.system', ['tab' => 'index']) }}#local-index">أدوات › فهرس المتاجر</a>. <span class="lq-settings-card__tech">للمطوّر: <code dir="ltr">python scripts/build_catalog_index.py --discover</code> بيفحص خرايط المتاجر بدون ما يكتب شي.</span></p>
         @else
-            <p class="lq-settings-card__note" data-local-index-status>بالفهرس {{ number_format($idx['products']) }} صفحة منتج من {{ count($idx['stores']) }} متجر ({{ implode('، ', array_keys($idx['stores'])) }})@if ($idx['last']) · آخر تحديث <span dir="ltr">{{ $idx['last'] }}</span>@endif. بيتحدّث لحاله إذا صار أقدم من أسبوع، أو هلق بزر «حدّث الفهرس هلق» من <a class="lq-link" href="{{ route('dashboard.diagnostics') }}#local-index">الصحة › فهرس المتاجر المحلي</a>.</p>
+            <p class="lq-settings-card__note" data-local-index-status>بالفهرس {{ number_format($idx['products']) }} صفحة منتج من {{ count($idx['stores']) }} متجر ({{ implode('، ', array_keys($idx['stores'])) }})@if ($idx['last']) · آخر تحديث <span dir="ltr">{{ $idx['last'] }}</span>@endif. بيتحدّث لحاله إذا صار أقدم من أسبوع، أو هلق بزر «حدّث الفهرس هلق» من <a class="lq-link" href="{{ route('dashboard.system', ['tab' => 'index']) }}#local-index">أدوات › فهرس المتاجر</a>.</p>
         @endif
     </fieldset>
 
@@ -92,7 +92,7 @@
             <span>موقف: بلا بحث بالصورة</span>
         </label>
         {{ $fieldError('visual_search') }}
-        <p class="lq-settings-card__note" data-serpapi-key>مفتاح SerpApi: {{ $src['serpapi_saved'] ? 'محفوظ' : 'غير محفوظ' }} · بيتضاف من تبويب <a class="lq-link" href="{{ route('dashboard.settings') }}?tab=keys">المفاتيح</a>.</p>
+        <p class="lq-settings-card__note" data-serpapi-key>مفتاح SerpApi: {{ $src['serpapi_saved'] ? 'محفوظ' : 'غير محفوظ' }} · بيتضاف من تبويب <a class="lq-link" href="{{ route('dashboard.system', ['tab' => 'keys']) }}">المفاتيح</a>.</p>
         @if ($src['visual'] === 'serpapi' && !$src['serpapi_saved'])
             <x-lq.alert variant="warning" title="مفتاح SerpApi مش محفوظ:">البحث بالصورة موقف فعلياً لحد ما تضيف المفتاح، أو تختار «تلقائي».</x-lq.alert>
         @endif
@@ -100,7 +100,7 @@
             <span class="lq-field__label">سعر بحث SerpApi الواحد (دولار)</span>
             <input type="number" class="lq-input lq-settings-field__control" name="serpapi_lens_price_usd" min="0" max="1" step="0.001" value="{{ $src['serpapi_price'] }}" dir="ltr" inputmode="decimal" {{ $fieldAttrs('serpapi_lens_price_usd') }}>
             {{ $fieldError('serpapi_lens_price_usd') }}
-            <span class="lq-field__hint">تقديري، للتكلفة بصفحة الصحة. عدّله حسب خطتك. ما بينطلب أكتر من بحث SerpApi واحد لكل منتج.</span>
+            <span class="lq-field__hint">تقديري، للتكلفة بـ«عمليات البحث». عدّله حسب خطتك. ما بينطلب أكتر من بحث SerpApi واحد لكل منتج.</span>
         </label>
     </fieldset>
 
@@ -135,7 +135,7 @@
         <p class="lq-settings-card__intro">إعدادات نادراً ما بتحتاجها. غيّرها بس إذا بتعرف شو بتعمل.</p>
     </div>
 
-    <p class="lq-settings-card__note">نموذج قراءة الملصق (Gemini أو Claude) والنموذج القوي وميزانيته صاروا بتبويب <a class="lq-link" href="{{ route('dashboard.settings') }}?tab=models">نماذج التحقق</a>.</p>
+    <p class="lq-settings-card__note">نموذج قراءة الملصق (Gemini أو Claude) والنموذج القوي وميزانيته صاروا بتبويب <a class="lq-link" href="{{ route('dashboard.system', ['tab' => 'models']) }}">نماذج التحقق</a>.</p>
 
     <div class="lq-settings-switch-row">
         <x-lq.switch name="strict_brand_match" value="true" label="مطابقة الماركة الصارمة" show-label :checked="$adv['strict']" :disabled="(bool) $dbError" />
@@ -166,7 +166,7 @@
         @endif
     </fieldset>
 
-    <p class="lq-settings-card__note">سعر Serper التقديري ثابت بالنظام؛ أسعار نماذج قراءة الملصق بتتعدّل من تبويب «نماذج التحقق»، والتكلفة كلها بصفحة <a class="lq-link" href="{{ route('dashboard.diagnostics') }}">الصحة والتكلفة</a>.</p>
+    <p class="lq-settings-card__note">سعر Serper التقديري ثابت بالنظام؛ أسعار نماذج قراءة الملصق بتتعدّل من تبويب «نماذج التحقق»، والتكلفة كلها بـ<a class="lq-link" href="{{ route('dashboard.system', ['tab' => 'search']) }}#search-ops">عمليات البحث</a>.</p>
 
     <div class="lq-settings-card__actions">
         <x-lq.button type="submit" icon="check" :disabled="(bool) $dbError">حفظ</x-lq.button>

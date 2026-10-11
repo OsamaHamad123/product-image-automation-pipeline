@@ -132,7 +132,7 @@ def test_curation_reject_forwards_size_identity_to_the_bridge():
 # index.blade.php: no writes to missing elements
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("name", ["index", "catalog", "batch_automation"])
+@pytest.mark.parametrize("name", ["index", "catalog"])
 def test_every_element_id_the_script_reads_exists(name):
     text = read(VIEWS / "dashboard" / f"{name}.blade.php")
     layout = read(VIEWS / "layouts" / "laqta.blade.php")
@@ -145,13 +145,13 @@ def test_every_element_id_the_script_reads_exists(name):
 
 
 def test_batch_progress_counts_lives_in_the_progress_panel():
-    # Home (Laqta): the current run's counts are written by public/js/home.js into the live block of the
-    # «آخر تشغيل» card, which exists in the page.
+    # «اليوم»: the current run's counts are written by public/js/run.js into the progress block of the
+    # «التشغيل الحالي» card, which exists in the page; home.js no longer draws a second copy («آخر تشغيل»)
     index = read(VIEWS / "dashboard" / "index.blade.php")
-    panel = index[index.index('data-home="lastrun-live"'):index.index('data-home="lastrun-summary"')]
-    assert 'data-home="live-counts"' in panel
-    home = read(DASH / "public" / "js" / "home.js")
-    assert "$('live-counts')" in home
+    panel = index[index.index('data-run="progress"'):index.index('data-run="finished"')]
+    assert 'data-run="done"' in panel and 'data-run="of"' in panel
+    assert "$('done')" in read(DASH / "public" / "js" / "run.js")
+    assert 'data-home="lastrun' not in index and "lastrun" not in read(DASH / "public" / "js" / "home.js")
 
 
 # ---------------------------------------------------------------------------

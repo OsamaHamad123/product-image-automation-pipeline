@@ -8,12 +8,15 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Cache;
 
 /**
- * لقطة · الرئيسية (the Home page).
+ * لقطة · اليوم (the Today page: the old Home and Run pages on one page, resources/views/dashboard/index.blade.php).
  *
- *   GET /               the page; the live parts come from /api/run/live (RunController::snapshot)
- *   GET /api/overview   the slower parts: the sheet funnel and the KPIs built on it, auto-publish readiness
- *                       (cli_bridge review_stats), the week's cost and provider alerts (cli_bridge ops_health,
- *                       shared cache with the Health page), and the last connection check.
+ *   GET /               the page; the live parts come from /api/run/live (RunController::snapshot). An admin also gets
+ *                       the run panel and the sheet tools (RunController::autoPublishState / sheetTab); a reviewer
+ *                       gets neither (ReviewerLimits blocks their writes anyway).
+ *   GET /api/overview   the slower parts: the sheet funnel and the KPIs built on it, and the provider alerts
+ *                       (cli_bridge ops_health, shared cache with the Health page) the one alert banner merges.
+ *                       Auto-publish readiness lives in Settings › النشر الآلي, the services and the week's cost on
+ *                       Health: this page no longer reads them.
  *
  * One number, one source (each KPI names its source in the JSON):
  * - «بانتظار مراجعتك» is QueueStats::counters() ready_for_review: the sidebar badge and /api/batch-status.
@@ -22,9 +25,6 @@ use Illuminate\Support\Facades\Cache;
  */
 class OverviewController extends Controller
 {
-    public const REVIEW_STATS_CACHE_KEY = 'laqta_review_stats_v1';
-    public const REVIEW_STATS_CACHE_SECONDS = 60;
-
     /** Levantine month names (the design writes "30 أيلول"). */
     public const MONTHS = ['كانون الثاني', 'شباط', 'آذار', 'نيسان', 'أيار', 'حزيران', 'تموز', 'آب', 'أيلول',
                            'تشرين الأول', 'تشرين الثاني', 'كانون الأول'];
@@ -40,15 +40,6 @@ class OverviewController extends Controller
         'not_searched' => ['label' => 'لسا ما انبحث عنها', 'tone' => 'empty'],
     ];
 
-    /** The services the design lists, with their names on the page (verify_cloud_services.py keys). */
-    public const SERVICES = [
-        'google_sheets' => 'Google Sheet',
-        'serper' => 'Serper',
-        'gemini' => 'Gemini',
-        'photoroom' => 'PhotoRoom',
-        'cloudinary' => 'Cloudinary',
-    ];
-
     /** What an ops_health alert means for the owner (the alert codes stay out of the text). */
     public const ALERT_HINTS = [
         'SERPER_CREDIT' => 'البحث عن الصور واقف لحد ما تشحن رصيد Serper أو تصلّح المفتاح.',
@@ -58,6 +49,7 @@ class OverviewController extends Controller
     public function index()
     {
         $live = RunController::snapshot();
+        $admin = !(bool) auth()->user()?->isReviewer();
         // the greeting and the date line in the shop's time zone (home.js rewrites them in the same zone)
         $now = now()->setTimezone(ReviewController::displayTimezone());
         $owner = trim((string) env('LAQTA_OWNER_NAME', ''));
@@ -69,6 +61,10 @@ class OverviewController extends Controller
             'lqReviewCount' => $live['batch']['ready_for_review'] ?? null,
             // «جهّز لقطة» بس لما التجهيز ناقص (null لتركيبة مجهّزة أو لما قاعدة البيانات ما بترد)
             'setupCard' => SetupController::homeCard(),
+            // the run panel and the sheet tools: the owner's only (a reviewer's page renders neither)
+            'todayAdmin' => $admin,
+            'autoPublish' => $admin ? RunController::autoPublishState() : null,
+            'sheetTab' => $admin ? RunController::sheetTab() : null,
         ]);
     }
 
@@ -89,7 +85,7 @@ class OverviewController extends Controller
         return (self::WEEKDAYS[$weekday] ?? '') . '، ' . $day . ' ' . (self::MONTHS[$month - 1] ?? '');
     }
 
-    /** Everything /api/overview returns. $refresh reads the sheet, review_stats and ops_health again. */
+    /** Everything /api/overview returns. $refresh reads the sheet and ops_health again. */
     public static function overview(bool $refresh = false): array
     {
         $out = ['status' => 'success', 'generated_at' => time()];
@@ -113,23 +109,8 @@ class OverviewController extends Controller
         }
         $out['kpis'] = self::kpis($out['review'], $out['sheet']);
 
-        $stats = self::reviewStats($refresh);
-        $out['readiness'] = $stats !== null
-            ? ['status' => 'ok'] + self::readiness($stats)
-            : ['status' => 'error', 'message' => 'ما قدرنا نحسب جاهزية النشر الآلي هلق.'];
-
         $ops = self::opsHealth($refresh);
-        if ($ops !== null) {
-            $week = $ops['windows']['7d'] ?? [];
-            $out['cost'] = ['status' => 'ok', 'week_usd' => (float) ($week['cost_usd']['total'] ?? 0),
-                            'searches' => (int) ($week['searches'] ?? 0)];
-            $out['alerts'] = self::alerts($ops['alerts'] ?? []);
-        } else {
-            $out['cost'] = ['status' => 'error', 'message' => 'ما قدرنا نقرأ التكلفة هلق.'];
-            $out['alerts'] = [];
-        }
-
-        $out['services'] = self::services(ProductController::lastDiagnostics());
+        $out['alerts'] = $ops !== null ? self::alerts($ops['alerts'] ?? []) : [];
         return $out;
     }
 
@@ -249,23 +230,6 @@ class OverviewController extends Controller
         return $out;
     }
 
-    /** cli_bridge review_stats, cached for a minute (it only reads review_decisions). */
-    public static function reviewStats(bool $refresh = false): ?array
-    {
-        if (!$refresh) {
-            $cached = Cache::get(self::REVIEW_STATS_CACHE_KEY);
-            if (is_array($cached)) {
-                return $cached;
-            }
-        }
-        $result = PythonBridge::run('review_stats');
-        if (($result['status'] ?? '') !== 'success') {
-            return null;
-        }
-        Cache::put(self::REVIEW_STATS_CACHE_KEY, $result, self::REVIEW_STATS_CACHE_SECONDS);
-        return $result;
-    }
-
     /** cli_bridge ops_health through the Health page's cache (same key and lifetime), or null when it fails. */
     public static function opsHealth(bool $refresh = false): ?array
     {
@@ -283,66 +247,6 @@ class OverviewController extends Controller
         return $result;
     }
 
-    /**
-     * «جاهزية النشر الآلي» from review_stats: per brand, how far its reviewed picks are from the Wilson bar.
-     * Brands without a reviewed pick are left out; at most $limit brands, most reviewed first.
-     */
-    public static function readiness(array $stats, int $limit = 4): array
-    {
-        $bar = (float) ($stats['thresholds']['min_lower_bound'] ?? 0.98);
-        $perfect = (int) ($stats['thresholds']['perfect_record_reviews'] ?? 0);
-        $brands = [];
-        foreach ((array) ($stats['brands'] ?? []) as $b) {
-            $prechecked = (int) ($b['prechecked'] ?? 0);
-            $accepted = (int) ($b['accepted'] ?? 0);
-            $name = trim((string) ($b['brand'] ?? ''));
-            if ($prechecked <= 0 || $name === '') {
-                continue;
-            }
-            $status = (string) ($b['status'] ?? 'needs_reviews');
-            $lower = is_numeric($b['lower_bound'] ?? null) ? (int) floor((float) $b['lower_bound'] * 100) : 0;
-            $needed = is_numeric($b['reviews_needed'] ?? null) ? (int) $b['reviews_needed'] : null;
-            if ($status === 'ready') {
-                $text = 'جاهزة للنشر الآلي · مضمون ' . $lower . '%';
-                $pct = 100;
-                $tone = 'success';
-            } elseif ($status === 'low_precision' || $needed === null) {
-                $text = $accepted . ' من ' . $prechecked . ' صحيحة · دقة أقل من المطلوب';
-                $pct = $perfect > 0 ? min(100, $prechecked / $perfect * 100) : 0;
-                $tone = 'danger';
-            } else {
-                // a brand with a rejected pick says so: "3 من 4 صحيحة", not "3 مراجعات صحيحة"
-                $text = ($accepted < $prechecked ? $accepted . ' من ' . $prechecked . ' صحيحة'
-                        : self::correctReviews($accepted)) . ' · مضمون ' . $lower . '%';
-                $pct = $needed > 0 ? min(100, $prechecked / $needed * 100) : 0;
-                $tone = 'teal';
-            }
-            $brands[] = ['brand' => $name, 'status' => $status, 'text' => $text, 'pct' => round($pct, 1),
-                         'tone' => $tone, 'reviews_needed' => $needed];
-        }
-        return [
-            'bar_pct' => (int) round($bar * 100),
-            'perfect_record_reviews' => $perfect,
-            'intro' => $perfect > 0
-                ? 'الماركة بتصير جاهزة للنشر الآلي بعد حوالي ' . $perfect . ' مراجعة صحيحة بدون ولا غلطة.'
-                : 'الماركة بتصير جاهزة للنشر الآلي لما مراجعاتك تثبت إن اقتراحاتها صحيحة تقريباً دايماً.',
-            'brands' => array_slice($brands, 0, $limit),
-            'more' => max(0, count($brands) - $limit),
-        ];
-    }
-
-    /** "مراجعة صحيحة وحدة", "مراجعتين صحيحتين", "6 مراجعات صحيحة", "12 مراجعة صحيحة". */
-    public static function correctReviews(int $n): string
-    {
-        if ($n === 1) {
-            return 'مراجعة صحيحة وحدة';
-        }
-        if ($n === 2) {
-            return 'مراجعتين صحيحتين';
-        }
-        return $n . (($n >= 3 && $n <= 10) ? ' مراجعات صحيحة' : ' مراجعة صحيحة');
-    }
-
     /** ops_health alerts as banner lines: the Arabic message as the title and what it means as the text. */
     public static function alerts(array $alerts): array
     {
@@ -355,32 +259,5 @@ class OverviewController extends Controller
             $out[] = ['title' => $message, 'text' => self::ALERT_HINTS[(string) ($a['code'] ?? '')] ?? ''];
         }
         return $out;
-    }
-
-    /**
-     * «الخدمات» from the last connection check (ProductController::lastDiagnostics, never a new paid check):
-     * checked_at (epoch or null) and one item per service the design lists.
-     */
-    public static function services(?array $diagnostics): array
-    {
-        if ($diagnostics === null) {
-            return ['checked_at' => null, 'items' => [], 'text' => 'ما انعمل فحص بعد'];
-        }
-        $checked = strtotime((string) ($diagnostics['checked_at'] ?? '')) ?: null;
-        $items = [];
-        foreach (self::SERVICES as $key => $name) {
-            $service = $diagnostics['services'][$key] ?? null;
-            if (!is_array($service)) {
-                continue;
-            }
-            $status = (string) ($service['status'] ?? '');
-            [$label, $tone] = match ($status) {
-                'online' => [$key === 'google_sheets' ? 'متصل' : 'يعمل', 'success'],
-                'disabled' => ['مش مفعّل', 'muted'],
-                default => ['ما بيرد', 'danger'],
-            };
-            $items[] = ['key' => $key, 'name' => $name, 'label' => $label, 'tone' => $tone];
-        }
-        return ['checked_at' => $checked, 'items' => $items, 'text' => ''];
     }
 }

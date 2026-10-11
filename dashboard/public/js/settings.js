@@ -1,5 +1,7 @@
 /*
- * لقطة · الإعدادات (resources/views/dashboard/settings.blade.php and resources/views/settings/*).
+ * لقطة · الإعدادات (resources/views/dashboard/settings.blade.php and resources/views/settings/*): the six settings tabs
+ * of «النظام» (/system?tab=…, system.blade.php: the rail is a row of links, and «ما انحفظ» asks before one leaves a
+ * changed form). On the setup tab only the helpers run (window.LaqtaSettings, for setup.js): no [data-settings-page].
  *
  * - ربط الشيت: «معاينة» POSTs /api/sheet/preview and shows the resolved columns and the first rows;
  *   «حفظ الربط» asks first (it clears the cached sheet, keeps every review) and POSTs /api/sheet/save.

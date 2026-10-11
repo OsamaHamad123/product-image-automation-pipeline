@@ -142,7 +142,7 @@ def test_the_health_page_shows_the_last_run(tmp_path):
 require '{dash}/vendor/autoload.php';
 $app = require '{dash}/bootstrap/app.php';
 $kernel = $app->make(Illuminate\\Contracts\\Http\\Kernel::class);
-$response = $kernel->handle(Illuminate\\Http\\Request::create('/system-diagnostics', 'GET'));
+$response = $kernel->handle(Illuminate\\Http\\Request::create('/system', 'GET'));
 echo json_encode(['status' => $response->getStatusCode(), 'body' => $response->getContent()], JSON_UNESCAPED_UNICODE);
 """
         with tempfile.NamedTemporaryFile("w", suffix=".php", delete=False, encoding="utf-8") as fh:

@@ -807,22 +807,22 @@ def test_the_processing_data_offers_the_fallback_only_when_rembg_is_installed():
 def test_the_processing_tab_shows_the_switch_with_rembg_and_hides_it_without(app_env):
     db, env = app_env["db"], app_env["env"]
     _put(db, {"bg_fallback": "off"})
-    (grabcut_only,) = _kernel(env, [["GET", "/settings?tab=processing", {}]])    # the stub bridge: only GrabCut installed
+    (grabcut_only,) = _kernel(env, [["GET", "/system?tab=processing", {}]])    # the stub bridge: only GrabCut installed
     assert LABEL not in grabcut_only["body"] and "bg_fallback" not in grabcut_only["body"]
     stub = Path(env["CLI_BRIDGE_PATH"])
     text = stub.read_text(encoding="utf-8")
     assert '\\"rembg\\": false' in text
     stub.write_text(text.replace('\\"rembg\\": false', '\\"rembg\\": true'), encoding="utf-8")   # rembg installed
-    (shown,) = _kernel(env, [["GET", "/settings?tab=processing", {}]])
+    (shown,) = _kernel(env, [["GET", "/system?tab=processing", {}]])
     body = shown["body"]
     assert "عزل محلي بموديل BiRefNet (لازم يكون منزّل)" in body and "GrabCut ما بيشتغل تلقائياً أبداً" in body
     assert LABEL in body and 'data-bg-fallback' in body and 'name="bg_fallback_shown" value="1"' in body
     switch = re.search(r'<input[^>]*name="bg_fallback"[^>]*>', body).group(0)
     assert 'value="local"' in switch and "checked" not in switch              # saved 'off': the switch is off
     _put(db, {"bg_fallback": "local"})
-    (shown,) = _kernel(env, [["GET", "/settings?tab=processing", {}]])
+    (shown,) = _kernel(env, [["GET", "/system?tab=processing", {}]])
     assert "checked" in re.search(r'<input[^>]*name="bg_fallback"[^>]*>', shown["body"]).group(0)
-    (hidden,) = _kernel(dict(env, LQ_STUB_MODE="down"), [["GET", "/settings?tab=processing", {}]])   # no local info
+    (hidden,) = _kernel(dict(env, LQ_STUB_MODE="down"), [["GET", "/system?tab=processing", {}]])   # no local info
     assert LABEL not in hidden["body"] and "bg_fallback" not in hidden["body"]
 
 

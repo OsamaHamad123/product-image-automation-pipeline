@@ -11,6 +11,27 @@
     max-width: 980px;
 }
 
+/* the section's head (the page header «النظام» is above): the title and the progress */
+.lq-setup__head {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: var(--lq-space-3);
+}
+
+.lq-setup__intro {
+    display: flex;
+    flex-direction: column;
+    gap: var(--lq-space-1);
+    max-width: 640px;
+}
+
+.lq-setup__lead {
+    margin: 0;
+    color: var(--lq-text-2);
+}
+
 .lq-setup__progress {
     font-size: var(--lq-fs-xs);
     color: var(--lq-text-2);

@@ -216,7 +216,8 @@ def test_main_column_and_page_roots_use_the_layout_tokens():
     assert "padding: var(--lq-main-pad-top) var(--lq-main-pad-inline) var(--lq-main-pad-bottom)" in main
     assert re.search(r"\.lq-main:not\(\.lq-main--flush\) > \* \{\s*max-width: var\(--lq-content-max\);", css)
     assert re.search(r"\.lq-page-header__desc,\s*\.lq-card__lead \{\s*max-width: var\(--lq-measure\);", css)
-    roots = {"home": ".lq-home", "run": ".lq-run", "health": ".lq-health", "settings": ".lq-settings",
+    # run.css has no page root of its own: the run panel and the tools sit in «اليوم»'s .lq-home
+    roots = {"home": ".lq-home", "health": ".lq-health", "settings": ".lq-settings",
              "setup": ".lq-setup"}
     for name, selector in roots.items():
         block = re.search(r"\n" + re.escape(selector) + r" \{([^}]*)\}", read(PAGE_CSS[name]))

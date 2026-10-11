@@ -61,10 +61,11 @@ def test_the_tab_bar_has_an_account_item_that_submits_the_logout_form():
     assert 'id="lq-account-sheet"' in sheet and "data-lq-account-sheet hidden" in sheet
     assert '<button class="lq-btn lq-btn--secondary lq-account-sheet__logout" type="submit" form="lqLogoutForm">خروج</button>' in sheet
     assert "auth()->user()->name" in sheet
-    # the dot sits in the run item only (a reviewer has no run item) and is admin-only in any case
-    dot = re.search(r"@if \(\$lqItem\['key'\] === 'run'\)\s*\{\{--.*?--\}\}\s*<span class=\"lq-nav__dot\" data-lq-run-dot data-lq-admin",
+    # the dot sits on «اليوم» (the run panel's page) for the owner only, and is admin-only in any case
+    dot = re.search(r"@if \(\$lqItem\['key'\] === 'home' && ! \$lqReviewer\)\s*\{\{--.*?--\}\}\s*<span class=\"lq-nav__dot\" data-lq-run-dot data-lq-admin",
                     layout, re.S)
     assert dot
+    assert "'key' => 'run'" not in layout                    # no «التشغيل» item: the run panel is on «اليوم»
 
 
 def test_the_account_item_and_the_dot_show_only_on_the_tab_bar():
@@ -237,7 +238,7 @@ def test_the_layout_poll_waits_while_hidden_and_feeds_the_dot():
 
 @NEEDS_NODE
 def test_the_layout_poll_backs_off_where_the_page_polls_the_run_itself():
-    out = _layout("nodes['[data-run-page]'] = new El('run-page');", r"""
+    out = _layout("nodes['[data-home-page]'] = new El('home-page');", r"""
 (async () => {
     await flush();
     console.log(JSON.stringify({ fetches: fetches.length, next: timers[0].ms }));
@@ -419,8 +420,8 @@ sources.elements = [{ name: 'expansion_enabled', type: 'checkbox', value: 'true'
 const page = new El('div');
 page.kids.form = [speed, sources];
 const tabLink = new El('a', ['a[href]']);
-tabLink.setAttribute('href', '/settings?tab=keys');
-tabLink.href = 'http://x/settings?tab=keys';
+tabLink.setAttribute('href', '/system?tab=keys');      // a link of the «النظام» rail
+tabLink.href = 'http://x/system?tab=keys';
 // a submit: capture listeners on the page, the form's own listeners, then the document (bubble)
 function submit(form) {
     let prevented = false, stopped = false;
@@ -455,7 +456,7 @@ globalThis.document = {
     getElementById: () => null
 };
 globalThis.addEventListener = (t, fn) => { (winListeners[t] = winListeners[t] || []).push(fn); };
-globalThis.location = { pathname: '/settings', search: '?tab=advanced', hash: '', href: 'http://x/settings?tab=advanced' };
+globalThis.location = { pathname: '/system', search: '?tab=advanced', hash: '', href: 'http://x/system?tab=advanced' };
 const asked = [];
 let answer = false;
 globalThis.confirm = t => { asked.push(t); return answer; };
@@ -526,7 +527,9 @@ globalThis.Laqta = { ask: o => { asks.push(o); return Promise.resolve(reply); },
 def test_a_settings_save_lands_on_its_card():
     php = read(CONTROLLER)
     assert "$anchor = self::anchorFor(self::field(request(), 'section'));" in php
-    assert "($anchor !== '' ? '#' . $anchor : '')" in php
+    # on its card in its tab of «النظام»: /system?tab=…#id (SystemController::url adds the # only for an anchor)
+    assert "SystemController::url(self::tabFrom($tab), [], $anchor)" in php
+    assert "($hash !== '' ? '#' . $hash : '')" in read(CONTROLLER.parent / "SystemController.php")
     views = "".join(read(p) for p in (VIEWS / "settings").glob("*.blade.php"))
     for anchor in ("speed", "sources", "advanced", "models", "processing", "auto-publish", "strict-lane"):
         assert f'id="lq-settings-{anchor}"' in views, anchor

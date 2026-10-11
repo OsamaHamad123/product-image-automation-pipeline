@@ -112,7 +112,7 @@ def test_the_controller_runs_the_bridge_action_with_a_kill_timeout():
     # the page and the GET read the saved result; neither runs the check
     assert "PUBLISH_CHECK_FILE = '../temp/publish_check_last.json'" in text
     assert pc.LAST_RESULT_PATH.replace("\\", "/").endswith("temp/publish_check_last.json")
-    for name in ("page", "lastPublishCheckJson"):
+    for name in ("pageData", "lastPublishCheckJson"):
         body = _method(text, name)
         assert "runPublishCheck" not in body and "proc_open" not in body and "PythonBridge::run" not in body
 
@@ -173,8 +173,9 @@ def test_the_review_screen_links_failed_approvals_to_the_check():
     failed = panel[panel.index("} else {"):panel.index("const failed = st.jobs.filter")]
     assert "j.state === 'failed' && j.type !== 'reject'" in failed       # an approval or upload, not a reject
     assert "href: S.urls.publishCheck" in failed and "text: 'افحص النشر'" in failed
-    assert "publishCheck: '/system-diagnostics#publish-check'" in app
-    assert "'publishCheck' => route('dashboard.diagnostics') . '#publish-check'," in read(REVIEW_PHP)
+    assert "publishCheck: '/system?tab=publish#publish-check'" in app
+    # the server's link: «أدوات» › «فحص النشر» of «النظام» (the script's default, the old address, redirects there)
+    assert "'publishCheck' => url(SystemController::url('publish', [], 'publish-check'))," in read(REVIEW_PHP)
     assert ".rv-jobs__check {" in read(REVIEW_CSS)
 
 
@@ -189,7 +190,7 @@ await flush();
 out.links = document.querySelectorAll('.rv-jobs__check').map(a => [a.getAttribute('href'), a.textContent, a.tagName]);
 out.text = jobsText();
 """, tmp_path, fixture([picked(30, "Almarai Milk 1L"), picked(31, "Almarai Laban 1L")]), config={"row": 30})
-    assert out["links"] == [["/system-diagnostics#publish-check", "افحص النشر", "A"]]
+    assert out["links"] == [["/system?tab=publish#publish-check", "افحص النشر", "A"]]
     # «وحدة فشلت: أعد المحاولة» (was «خلصت: 0 مشيت، ووحدة ما مشيت»)
     assert "وحدة فشلت: أعد المحاولة" in out["text"] and "ما قدرنا ننزّل الصورة" in out["text"]
 
@@ -345,7 +346,7 @@ def pc_app(mariadb_or_skip, tmp_path):
 
 
 def test_the_endpoint_runs_the_check_and_returns_it_without_secrets(pc_app):
-    page_, run, last = _kernel(pc_app["env"], [["GET", "/system-diagnostics", {}],
+    page_, run, last = _kernel(pc_app["env"], [["GET", "/system?tab=publish", {}],
                                                ["POST", "/api/system/publish-check", {}],
                                                ["GET", "/api/system/publish-check", {}]])
     assert page_["status"] == 200 and 'id="publish-check"' in page_["body"] and "افحص النشر" in page_["body"]

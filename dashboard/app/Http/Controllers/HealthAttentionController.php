@@ -5,7 +5,8 @@ namespace App\Http\Controllers;
 use Illuminate\Support\Facades\Cache;
 
 /**
- * رأس صفحة الصحة: «كلشي تمام» أو قائمة قصيرة «شو بدو منك»، كل بند بزر لتصليحه (diagnostics.blade.php، health.js).
+ * رأس قسم «الحالة الآن» بصفحة «النظام»: «كلشي تمام» أو قائمة قصيرة «شو بدو منك»، كل بند بزر لتصليحه
+ * (diagnostics.blade.php، health.js).
  *
  * المصادر نفسها اللي بتقرأها الصفحة وفحص /healthz، بلا أي مصدر جديد:
  * - انقطاع المزودين والصرف: تنبيهات ops_health (رصيد Serper، Gemini، ميزانية النموذج القوي ومفتاحه)، من الكاش بس
@@ -14,8 +15,10 @@ use Illuminate\Support\Facades\Cache;
  * - كتابات الشيت الميتة (DEAD) آخر 7 أيام، المساحة الفاضية، وعمر آخر ليلة ناجحة: HealthzController::collect.
  * - آخر تشغيل (temp/nightly/last_report.json): عطل، انقطاع، أو وقف عند الميزانية اليومية.
  * - آخر «فحص النشر» وعزل الخلفية المتوقف، وفهرس المتاجر المحلي (آخر جمع ناجح أقدم من أسبوعين).
- * كل بند: {key, tone, title, text, action: {label, href} أو {label, goto}}. goto بيفتح «تفاصيل متقدمة» على البطاقة
- * اللي فيها التصليح (publish-check، bg-restore، services، index-card، log-nightly) وبيحط التركيز على زرها.
+ * كل بند: {key, tone, title, text, action: {label, href, goto, admin}}. goto (publish-check، bg-restore، services،
+ * index-card، log-nightly) بيعطي رابط لقسم البطاقة اللي فيها التصليح (SystemController::gotoHref:
+ * /system?tab=…&goto=…#بطاقة)، وhealth.js بيحط التركيز على زرها (عالقسم نفسه بلا ما يحمّل الصفحة من جديد).
+ * admin: الرابط لقسم للمدير بس، فالزر ما بيبين للمراجع (data-lq-admin). goto=reload: زر بلا رابط.
  */
 class HealthAttentionController extends Controller
 {
@@ -29,14 +32,14 @@ class HealthAttentionController extends Controller
     /** تنبيهات ops_health -> [اللون، العنوان، النص، التصليح]. الرموز ما بتبين للمالك. */
     public const OPS_ALERTS = [
         'SERPER_CREDIT' => ['danger', 'رصيد Serper خلص أو المفتاح مرفوض',
-            'البحث عن الصور واقف لحد ما تشحن رصيد Serper أو تصلّح المفتاح.', ['label' => 'مفتاح Serper', 'href' => '/settings?tab=keys#lq-key-serper']],
+            'البحث عن الصور واقف لحد ما تشحن رصيد Serper أو تصلّح المفتاح.', ['label' => 'مفتاح Serper', 'href' => '/system?tab=keys#lq-key-serper']],
         'GEMINI_DOWN' => ['warning', 'Gemini ما عم يردّ',
-            'كل النتائج رايحة لمراجعتك بدون قراءة الملصق. تأكد من مفتاح Gemini.', ['label' => 'مفتاح Gemini', 'href' => '/settings?tab=keys#lq-key-gemini']],
+            'كل النتائج رايحة لمراجعتك بدون قراءة الملصق. تأكد من مفتاح Gemini.', ['label' => 'مفتاح Gemini', 'href' => '/system?tab=keys#lq-key-gemini']],
         'VERIFIER_BUDGET' => ['warning', 'ميزانية النموذج القوي لهالشهر خلصت',
             'المنتجات المش مؤكدة بتستنى مراجعتك بدون نظرة تانية. ارفع الميزانية أو استنى الشهر الجاي.',
-            ['label' => 'نماذج التحقق', 'href' => '/settings?tab=models']],
+            ['label' => 'نماذج التحقق', 'href' => '/system?tab=models']],
         'VERIFIER_KEY' => ['warning', 'مفتاح نموذج التحقق الإضافي مرفوض أو مش محفوظ',
-            'النموذج القوي ما عم يقرأ. ضيف مفتاحه أو وقّفه من «نماذج التحقق».', ['label' => 'المفتاح', 'href' => '/settings?tab=keys#lq-key-anthropic']],
+            'النموذج القوي ما عم يقرأ. ضيف مفتاحه أو وقّفه من «نماذج التحقق».', ['label' => 'المفتاح', 'href' => '/system?tab=keys#lq-key-anthropic']],
     ];
 
     /** GET /api/system/attention (?after=1: الصفحة سألت ops-health قبلها، فكاش ناقص يعني ما انقرا). */
@@ -119,7 +122,7 @@ class HealthAttentionController extends Controller
                     : ($dead === 2 ? 'رابطين' : $dead . ($dead <= 10 ? ' روابط' : ' رابط')) . ' ما وصلوا للشيت',
                 'الكتابة بالشيت ما زبطت بعد كل المحاولات بآخر ' . HealthzController::DEAD_WINDOW_DAYS . ' أيام. '
                 . 'تشغيل جديد بيرجع يكتب روابط الصور المعتمدة بدون ما يدوّر من جديد.',
-                ['label' => 'تشغيل جديد', 'href' => '/batch-automation#run-new']);
+                ['label' => 'تشغيل جديد', 'href' => '/#run-new']);
         }
 
         // كتابات رفضها الشيت لأنه الصف أو العمود تغيّر بعد ما انجدولت (صفوف انزاحت، تبويب انرجع من نسخة، عمود انمسح):
@@ -131,7 +134,7 @@ class HealthAttentionController extends Controller
                 'الصف أو العمود ما عاد متل ما كان وقت الاعتماد (صفوف انزاحت، تبويب انرجع من نسخة، أو عمود انمسح)، '
                 . 'فما كتبنا فوق شي ما منعرفه. التشغيل الجاي بيرجع يكتب روابط الصور المعتمدة لحاله؛ الأوصاف والتصنيفات '
                 . 'بتنكتب لما تنعتمد الصورة من جديد.',
-                ['label' => 'تشغيل جديد', 'href' => '/batch-automation#run-new']);
+                ['label' => 'تشغيل جديد', 'href' => '/#run-new']);
         }
 
         $free = $healthz['free_gb'] ?? null;
@@ -148,18 +151,18 @@ class HealthAttentionController extends Controller
             $card = HealthController::lastRunCard($run);
             $items[] = self::item('last_run', 'danger', 'آخر تشغيل ما خلص منيح',
                 $card['title'] . ($card['when'] !== '' ? ' (' . $card['when'] . ')' : '') . '. شوف شو صار وشغّل من جديد.',
-                ['label' => 'شوف آخر تشغيل', 'href' => '/batch-automation#run-current']);
+                ['label' => 'شوف آخر تشغيل', 'href' => '/#run-current']);
         } elseif ($outcome === 'stopped' && ($run['stop_reason'] ?? '') === 'budget_reached') {
             $items[] = self::item('spend', 'warning', 'آخر تشغيل وقف لأنو صرف اليوم وصل للميزانية اليومية',
                 'المنتجات الباقية بتستنى بالطابور وبتكمّل بتشغيل بكرا لحالها.',
-                ['label' => 'شوف آخر تشغيل', 'href' => '/batch-automation#run-current']);
+                ['label' => 'شوف آخر تشغيل', 'href' => '/#run-current']);
         }
 
         if (($healthz['nightly_known'] ?? false) && is_int($healthz['nightly_age_s'] ?? null)
             && $healthz['nightly_age_s'] > HealthzController::NIGHTLY_MAX_HOURS * 3600) {
             $hours = (int) round($healthz['nightly_age_s'] / 3600);
             $items[] = self::item('nightly', 'warning', 'التشغيل الليلي ما اشتغل من ' . self::hours($hours),
-                'آخر ليلة خلصت منيح كانت قبل ' . self::hours($hours) . '. شوف سجل التشغيل الليلي ليش، أو شغّل من صفحة التشغيل.',
+                'آخر ليلة خلصت منيح كانت قبل ' . self::hours($hours) . '. شوف سجل التشغيل الليلي ليش، أو شغّل من «اليوم».',
                 ['label' => 'سجل التشغيل الليلي', 'goto' => 'log-nightly']);
         }
 
@@ -205,9 +208,14 @@ class HealthAttentionController extends Controller
 
     private static function item(string $key, string $tone, string $title, string $text, array $action): array
     {
+        $goto = (string) ($action['goto'] ?? '');
+        $href = (string) ($action['href'] ?? '');
+        if ($href === '' && $goto !== '') {
+            $href = SystemController::gotoHref($goto);     // '' لـ reload
+        }
         return ['key' => $key, 'tone' => $tone, 'title' => $title, 'text' => $text,
-                'action' => ['label' => (string) $action['label'], 'href' => (string) ($action['href'] ?? ''),
-                             'goto' => (string) ($action['goto'] ?? '')]];
+                'action' => ['label' => (string) $action['label'], 'href' => $href, 'goto' => $goto,
+                             'admin' => $href !== '' && SystemController::adminHref($href)]];
     }
 
     /** الخدمات الأساسية اللي ما ردّت بآخر فحص (أسماؤها). */

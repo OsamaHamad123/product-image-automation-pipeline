@@ -1,5 +1,6 @@
 /*
- * لقطة · الإعدادات (Settings board). Page styles only; tokens and components come from ../laqta.css.
+ * لقطة · الإعدادات، وشريط «النظام» الجانبي (system.blade.php: this file is on every section of the page).
+ * Page styles only; tokens and components come from ../laqta.css.
  * Logical properties only (RTL).
  */
 
@@ -24,6 +25,62 @@
     flex-shrink: 0;
     gap: var(--lq-space-1);
     width: 210px;
+}
+
+/* «النظام» (system.blade.php): the same board, one rail for every section */
+.lq-system {
+    min-width: 0;
+}
+
+/* «النظام»: the rail in groups (الحالة، الإعدادات، أدوات، التجهيز); a hint shows under the open section only */
+.lq-system__rail {
+    gap: var(--lq-space-4);
+}
+
+.lq-system__group {
+    display: flex;
+    flex-direction: column;
+    gap: var(--lq-space-1);
+}
+
+.lq-system__group-label {
+    padding-inline: 14px;
+    font-size: var(--lq-fs-xs);
+    font-weight: 600;
+    color: var(--lq-text-3);
+}
+
+.lq-system__rail .lq-settings__tab:not(.is-active) .lq-settings__tab-hint {
+    display: none;
+}
+
+/* «كمّل التجهيز (N من 5)»: a slim link above the groups while setup is unfinished */
+.lq-body .lq-system__setup,
+.lq-system__setup {
+    display: flex;
+    align-items: center;
+    gap: var(--lq-space-2);
+    padding: var(--lq-space-2) 14px;
+    border: 1px solid var(--lq-border);
+    border-radius: 11px;
+    background: var(--lq-surface-2);
+    color: var(--lq-text);
+    font-size: var(--lq-fs-sm);
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.lq-body .lq-system__setup:hover {
+    border-color: var(--lq-border-strong);
+    color: var(--lq-text);
+}
+
+/* the content of a settings tab: the flash, then its cards */
+.lq-settings__content {
+    display: flex;
+    flex-direction: column;
+    gap: var(--lq-space-4);
+    min-width: 0;
 }
 
 .lq-body .lq-settings__tab,
@@ -507,6 +564,24 @@
 
     .lq-settings__tab-hint {
         display: none;
+    }
+
+    /* one scrolling row: the groups fall away, their labels too */
+    .lq-system__rail {
+        gap: var(--lq-space-1);
+    }
+
+    .lq-system__group {
+        display: contents;
+    }
+
+    .lq-system__group-label {
+        display: none;
+    }
+
+    .lq-body .lq-system__setup,
+    .lq-system__setup {
+        flex-shrink: 0;
     }
 }
 

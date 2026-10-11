@@ -1,5 +1,6 @@
 /*
- * لقطة · الصحة والتكلفة (Health board). Page styles only; tokens and components come from ../laqta.css.
+ * لقطة · أقسام الصحة بصفحة «النظام» (status, search, logs, publish, index, eval, recut). Page styles only; tokens and
+ * components come from ../laqta.css; the rail is in settings.css.
  * Logical properties only (RTL).
  */
 
@@ -780,66 +781,7 @@
     flex-shrink: 0;
 }
 
-/* «تفاصيل متقدمة»: every detailed card, collapsed by default */
-.lq-health-advanced {
-    display: block;
-}
-
-.lq-health-advanced__summary {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: baseline;
-    gap: 4px var(--lq-space-3);
-    padding: 14px 18px;
-    border: 1px solid var(--lq-border);
-    border-radius: var(--lq-radius-lg);
-    background: var(--lq-surface);
-    list-style: none;
-    cursor: pointer;
-}
-
-.lq-health-advanced__summary::-webkit-details-marker {
-    display: none;
-}
-
-/* a chevron: points down while shut, up while open */
-.lq-health-advanced__summary::after {
-    content: "";
-    align-self: center;
-    width: 8px;
-    height: 8px;
-    margin-inline-start: auto;
-    border-block-end: 2px solid var(--lq-text-3);
-    border-inline-end: 2px solid var(--lq-text-3);
-    transform: rotate(45deg);
-}
-
-.lq-health-advanced[open] > .lq-health-advanced__summary {
-    border-color: var(--lq-border-strong);
-}
-
-.lq-health-advanced[open] > .lq-health-advanced__summary::after {
-    transform: rotate(-135deg);
-}
-
-.lq-health-advanced__label {
-    font-size: var(--lq-fs-sm);
-    font-weight: 600;
-}
-
-.lq-health-advanced__hint {
-    font-size: var(--lq-fs-xs);
-    color: var(--lq-text-3);
-}
-
-.lq-health-advanced__body {
-    display: flex;
-    flex-direction: column;
-    gap: var(--lq-space-5);
-    margin-top: var(--lq-space-5);
-}
-
-/* the connection check, first in the advanced section */
+/* the connection check and its button («الحالة الآن») */
 .lq-health__checkbar {
     display: flex;
     flex-wrap: wrap;
@@ -860,7 +802,7 @@
     gap: var(--lq-space-2);
 }
 
-.lq-health-advanced__body .lq-health__footnote {
+.lq-health .lq-health__footnote {
     overflow-wrap: anywhere;
 }
 
@@ -1003,9 +945,4 @@
     .lq-health-log__body {
         max-height: 260px;
     }
-}
-
-/* «روح على»: links to the cards inside «تفاصيل متقدمة» (health.js opens it) */
-.lq-health__jump {
-    margin-block: calc(-1 * var(--lq-space-1)) var(--lq-space-1);
 }

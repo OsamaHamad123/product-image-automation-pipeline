@@ -3,8 +3,8 @@
  * scripts, from this file so the browser caches it: ?v=<filemtime>).
  *
  * - The sidebar run card, the review badge, the tab title's count and the owner's run dot on the phone tab bar poll
- *   GET /api/batch-status (<body data-lq-status-url>): every 5 s, 15 s on Run and Home (they poll /api/run/live
- *   themselves), none while the tab is hidden unless «نبّهني لما يخلص» waits for a running run.
+ *   GET /api/batch-status (<body data-lq-status-url>): every 5 s, 15 s on «اليوم» (it polls /api/run/live
+ *   itself), none while the tab is hidden unless «نبّهني لما يخلص» waits for a running run.
  * - Approvals running on the server (batch-status.approvals) under the run card; the session-expired banner
  *   (#lqSessionExpired) on 401 / 419.
  * - window.Laqta: normalizeRunStatus, describeRunStatus, plainNotice, refreshRunStatus, sessionExpired,
@@ -17,7 +17,7 @@
     'use strict';
 
     var POLL_MS = 5000;
-    // صفحة التشغيل والرئيسية بيسألوا /api/run/live كل 4–8 ثواني لحالهم: الشريط الجانبي بيخفّف لكل 15 ثانية هناك
+    // صفحة «اليوم» (/، data-home-page) بتسأل /api/run/live كل 4–10 ثواني لحالها: الشريط الجانبي بيخفّف لكل 15 ثانية هناك
     var PAGE_POLL_MS = 15000;
     // تبويب مخفي: ما في سؤال، إلا إذا المدير طلب «نبّهني لما يخلص» وفي تشغيل ماشي (كل 30 ثانية)
     var HIDDEN_POLL_MS = 30000;
@@ -27,14 +27,14 @@
     var PHASES = { starting: 'running', running: 'running', paused: 'paused', stopping: 'stopping',
                    error: 'error', review: 'idle', idle: 'idle' };
     var COPY = {
-        loading: { label: 'لحظة…', text: 'لحظة، عم نقرأ حالة التشغيل…', link: 'صفحة التشغيل ←' },
+        loading: { label: 'لحظة…', text: 'لحظة، عم نقرأ حالة التشغيل…', link: 'التشغيل ←' },
         idle: { label: 'جاهز', text: 'ما في تشغيل هلق', link: 'ابدأ تشغيل جديد ←' },
         running: { label: 'يعمل', text: 'عم نجهّز التشغيل…', link: 'عرض التفاصيل ←' },
         paused: { label: 'متوقف مؤقتاً', text: 'التشغيل متوقف مؤقتاً', link: 'عرض التفاصيل ←' },
         stopping: { label: 'عم يوقف', text: 'بيكمّل المنتج الحالي وبيوقف', link: 'عرض التفاصيل ←' },
         error: { label: 'توقف بعطل', text: 'توقف التشغيل بسبب عطل.', link: 'عرض التفاصيل ←' },
-        stuck: { label: 'عالق', text: 'التشغيل عالق', link: 'صفحة التشغيل ←' },
-        unknown: { label: 'غير معروف', text: 'تعذّر قراءة حالة التشغيل', link: 'صفحة التشغيل ←' }
+        stuck: { label: 'عالق', text: 'التشغيل عالق', link: 'التشغيل ←' },
+        unknown: { label: 'غير معروف', text: 'تعذّر قراءة حالة التشغيل', link: 'التشغيل ←' }
     };
     // Worker notices are "CODE: message | CODE: message"; show plain Arabic instead of the codes.
     var NOTICE_TEXT = {
@@ -354,7 +354,7 @@
 
     function pollMs() {
         if (document.hidden) return HIDDEN_POLL_MS;
-        return $('[data-run-page]') || $('[data-home-page]') ? PAGE_POLL_MS : POLL_MS;
+        return $('[data-home-page]') ? PAGE_POLL_MS : POLL_MS;     // «اليوم»: the admin's run panel and the reviewer's page
     }
 
     function poll() {

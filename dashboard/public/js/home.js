@@ -1,12 +1,15 @@
 /*
- * لقطة · الرئيسية (resources/views/dashboard/index.blade.php).
+ * لقطة · اليوم (resources/views/dashboard/index.blade.php): the greeting, the next step, the one alert banner, the KPI
+ * tiles and the sheet funnel. The run panel and the sheet tools on the same page belong to public/js/run.js.
  *
  * Two sources, both read-only:
- *   GET /api/run/live   every few seconds: the /api/batch-status payload (the same one the sidebar badge reads),
- *                       the current or last run's summary. «بانتظار مراجعتك» follows its ready_for_review.
- *   GET /api/overview   on load and after a run ends: the sheet funnel and its KPIs, auto-publish readiness,
- *                       the week's cost, provider alerts and the last connection check.
- * describeOverview / describeHomeLive / mergeBanner are pure (tests/test_laqta_run.py runs them under node).
+ *   GET /api/run/live   the /api/batch-status payload (the same one the sidebar badge reads) and the run's alert.
+ *                       «بانتظار مراجعتك» follows its ready_for_review. ONE poller per page:
+ *                         admin     run.js owns the poll; every snapshot reaches this file as the `lq:run-live`
+ *                                   document event (and LaqtaRunPage.controller.state.snapshot on mount).
+ *                         reviewer  run.js is not on the page: this file polls /api/run/live itself (loop()).
+ *   GET /api/overview   on load and after a run ends: the sheet funnel and its KPIs and the provider alerts.
+ * describeOverview / describeHomeLive / mergeBanner / nextStep are pure (tests/test_laqta_run.py runs them under node).
  */
 (function (root) {
     'use strict';
@@ -22,18 +25,14 @@
     }
 
     /* Every section of /api/overview as the page shows it; a section that failed says why, never zero. */
-    function describeOverview(res, nowSec) {
+    function describeOverview(res) {
         var data = res && res.ok && res.data && res.data.status === 'success' ? res.data : null;
-        var nowMs = (typeof nowSec === 'number' ? nowSec : Date.now() / 1000) * 1000;
         if (!data) {
             var message = 'ما قدرنا نجيب الأرقام هلق. منعيد المحاولة بعد شوي.';
             return {
                 state: 'error', message: message,
                 kpis: KPI_ORDER.map(function (k) { return { key: k, value: '—', note: message, tone: 'muted' }; }),
                 funnel: { state: 'error', message: message },
-                readiness: { state: 'error', message: message },
-                cost: { state: 'error', text: '—' },
-                services: { checkedText: '', items: [] },
                 alerts: []
             };
         }
@@ -73,81 +72,20 @@
             funnel = { state: 'error', message: sheet.message || 'ما قدرنا نقرأ الشيت هلق.' };
         }
 
-        var r = data.readiness || {};
-        var readiness = r.status === 'ok' ? {
-            state: (r.brands || []).length ? 'ok' : 'empty',
-            intro: String(r.intro || ''),
-            brands: (r.brands || []).map(function (b) {
-                return { brand: String(b.brand || ''), text: String(b.text || ''), pct: C.num(b.pct) || 0, tone: b.tone || 'teal' };
-            }),
-            more: C.num(r.more) || 0,
-            message: 'لسا ما في مراجعات كفاية لأي ماركة. كل ما تعتمد أو ترفض اقتراح، بتقرب الماركة من النشر الآلي.'
-        } : { state: 'error', message: r.message || 'ما قدرنا نحسب الجاهزية هلق.' };
-
-        var cost = data.cost || {};
-        var services = data.services || {};
         return {
             state: 'ok',
             kpis: kpis,
             funnel: funnel,
-            readiness: readiness,
-            cost: cost.status === 'ok' ? { state: 'ok', text: C.usdText(cost.week_usd) }
-                : { state: 'error', text: '—', message: cost.message || '' },
-            services: {
-                checkedText: C.num(services.checked_at) !== null ? 'آخر فحص ' + C.whenText(services.checked_at, nowMs)
-                    : (services.text || 'ما انعمل فحص بعد'),
-                items: Array.isArray(services.items) ? services.items : []
-            },
             alerts: Array.isArray(data.alerts) ? data.alerts : []
         };
     }
 
-    /* The live parts: the review count (same as the sidebar badge) and the «آخر تشغيل» card. */
-    function describeHomeLive(snapshot, nowSec) {
+    /* The live parts: the review count (same as the sidebar badge), the phase and the run's alert for the banner.
+     * The run itself (progress, the finished run's tiles) is drawn once, by run.js's «التشغيل الحالي» card. */
+    function describeHomeLive(snapshot) {
         var b = batchOf(snapshot);
-        var nowMs = (typeof nowSec === 'number' ? nowSec : Date.now() / 1000) * 1000;
-        if (!b) {
-            return {
-                phase: null, waiting: null,
-                banner: null,
-                lastRun: { mode: 'unavailable', title: 'آخر تشغيل',
-                           message: (snapshot && snapshot.message) || 'تعذّر قراءة حالة التشغيل هلق.' }
-            };
-        }
+        if (!b) return { phase: null, waiting: null, banner: null };
         var phase = String(b.phase || 'idle');
-        var runB = b.run && typeof b.run === 'object' ? b.run : {};
-        var run = snapshot.run && typeof snapshot.run === 'object' ? snapshot.run : null;
-        var lastRun;
-        if (C.isActive(phase)) {
-            var starting = phase === 'starting';
-            var total = C.num(runB.total) || 0;
-            var done = Math.min(C.num(runB.processed) || 0, total);
-            var percent = total > 0 ? Math.round(done / total * 100) : 0;
-            lastRun = {
-                mode: 'live',
-                title: 'التشغيل الحالي',
-                phaseText: phase === 'paused' ? 'التشغيل متوقف مؤقتاً.'
-                    : (phase === 'running' && b.current_product ? 'عم ندوّر هلق على: ' + b.current_product
-                        : String(b.phase_text || '')),
-                percent: starting ? null : percent,
-                percentText: starting ? '—' : percent + '%',
-                countsText: starting ? '' : done + ' من ' + total + ' في هذا التشغيل',
-                meta: run && run.current && run.rows_label ? 'الصفوف ' + run.rows_label : ''
-            };
-        } else if (run && run.total > 0) {
-            // a newer run stopped before its first search: this summary is the run before it
-            var startFailed = phase === 'error' && run.is_state_run === false;
-            lastRun = {
-                mode: 'summary',
-                title: startFailed ? 'التشغيل اللي قبله' : 'آخر تشغيل',
-                meta: C.runMeta(run, nowMs),
-                tiles: C.resultTiles(run.counts),
-                explain: (startFailed ? 'آخر محاولة وقفت قبل أول بحث (السبب بالشريط فوق). ' : '') +
-                    String(run.explain || '')
-            };
-        } else {
-            lastRun = { mode: 'empty', title: 'آخر تشغيل', message: 'لسا ما صار ولا تشغيل. ابدأ واحد من «تشغيل جديد».' };
-        }
         return {
             phase: phase,
             waiting: C.num(b.ready_for_review),
@@ -155,8 +93,7 @@
                 title: phase === 'error' ? 'وقف التشغيل:' : 'انتبه:',
                 text: C.alertText(b.alert),
                 variant: phase === 'error' ? 'danger' : 'warning'
-            } : null,
-            lastRun: lastRun
+            } : null
         };
     }
 
@@ -196,7 +133,7 @@
         if (b > 0) {
             return { key: 'brands', title: C.countText(b, 'ماركة', 'ماركتين', 'ماركات') + ' ناقصة من جدول الماركات.',
                      text: 'البحث ما بيعرفها، فما بينشر صورها لحاله. ضيفها قبل التشغيل الجاي.', action: 'ضيف الماركات',
-                     href: '/batch-automation#run-brands' };
+                     href: '/#run-brands' };
         }
         var nf = C.num(notFound);
         if (nf !== null && nf > 0) {
@@ -206,10 +143,10 @@
         }
         if (C.isActive(phase)) {
             return { key: 'running', title: 'التشغيل شغّال.', text: 'الصور بتوصل لقائمة المراجعة وهو شغّال.',
-                     action: 'تفاصيل التشغيل', href: '/batch-automation' };
+                     action: 'تفاصيل التشغيل', href: '/#run-current' };
         }
         return { key: 'run', title: 'كل شي مراجَع.', text: 'ابدأ تشغيل جديد ليجيب صور للمنتجات الباقية.',
-                 action: 'ابدأ تشغيل', href: '/batch-automation' };
+                 action: 'ابدأ تشغيل', href: '/#run-new' };
     }
 
     /* One banner for everything that needs attention: the run's alert first, then provider alerts (ops_health). */
@@ -237,16 +174,13 @@
     }
 
     /*
-     * deps: fetchJson, renderOverview(view), renderLive(view), renderBanner(view), toast(text, variant),
-     * now() -> epoch seconds, schedule(fn, ms), hidden() -> true while the tab is hidden (optional).
+     * deps: fetchJson, renderOverview(view), renderLive(view), renderBanner(view), toast(text, variant) (optional:
+     * without it the end of a run is not toasted here; on the admin's page run.js says it), schedule(fn, ms),
+     * hidden() -> true while the tab is hidden (optional). handleLive takes a snapshot from either source.
      */
     function createController(deps) {
         var state = { lastPhase: null, overview: null, live: null, liveBanner: null, brands: null, brandsAsked: false,
                       nextSaid: undefined };
-
-        function now() {
-            return deps.now ? deps.now() : Date.now() / 1000;
-        }
 
         function banner() {
             deps.renderBanner(mergeBanner(state.liveBanner, state.overview ? state.overview.alerts : []));
@@ -280,7 +214,7 @@
 
         function loadOverview(fresh) {
             return deps.fetchJson('/api/overview' + (fresh ? '?refresh=1' : '')).then(function (res) {
-                var view = describeOverview(res, now());
+                var view = describeOverview(res);
                 state.overview = view;
                 deps.renderOverview(view);
                 if (state.live && C.num(state.live.waiting) !== null) {
@@ -292,7 +226,7 @@
         }
 
         function handleLive(snapshot) {
-            var view = describeHomeLive(snapshot, now());
+            var view = describeHomeLive(snapshot);
             state.live = view;
             state.liveBanner = view.banner;
             deps.renderLive(view);
@@ -301,9 +235,9 @@
                 if (C.runJustFinished(state.lastPhase, view.phase)) {
                     // the funnel and the KPIs moved: read them again past every cache
                     loadOverview(true);
-                    // the same words as the Run page: a stopped run is not «خلص»
+                    // the same words as the run panel: a stopped run is not «خلص»
                     var stopped = C.runUnfinished(snapshot && snapshot.run);
-                    deps.toast(view.phase === 'error' ? 'وقف التشغيل بعطل.' : (stopped ? 'وقف التشغيل قبل ما يخلص.' : 'خلص التشغيل.'),
+                    if (deps.toast) deps.toast(view.phase === 'error' ? 'وقف التشغيل بعطل.' : (stopped ? 'وقف التشغيل قبل ما يخلص.' : 'خلص التشغيل.'),
                         view.phase === 'error' ? 'danger' : (stopped ? 'warning' : 'success'));
                 }
                 state.lastPhase = view.phase;
@@ -395,90 +329,13 @@
                 f.notes.forEach(function (n) { notes.appendChild(C.el(doc, 'p', null, n)); });
                 C.setHidden(notes, !f.notes.length);
             }
-
-            var r = view.readiness;
-            C.setHidden($('ready-loading'), true);
-            C.setText($('ready-intro'), r.intro || '');
-            C.setHidden($('ready-intro'), !r.intro);
-            C.setHidden($('ready-message'), r.state === 'ok');
-            C.setText($('ready-message'), r.message || '');
-            var list = $('ready-list');
-            C.clear(list);
-            (r.brands || []).forEach(function (b) {
-                var item = C.el(doc, 'li', 'lq-home-ready__item');
-                var head = C.el(doc, 'div', 'lq-home-ready__head');
-                var name = C.el(doc, 'bdi', 'lq-home-ready__brand', b.brand);
-                name.setAttribute('dir', 'auto');
-                head.appendChild(name);
-                head.appendChild(C.el(doc, 'span', 'lq-home-ready__text', b.text));
-                item.appendChild(head);
-                var track = C.el(doc, 'div', 'lq-progress lq-progress--sm');
-                track.setAttribute('role', 'progressbar');
-                track.setAttribute('aria-valuemin', '0');
-                track.setAttribute('aria-valuemax', '100');
-                track.setAttribute('aria-valuenow', String(Math.round(b.pct)));
-                track.setAttribute('aria-label', b.brand + ': ' + b.text);
-                var fill = C.el(doc, 'div', 'lq-progress__bar lq-tone--' + (b.tone === 'danger' ? 'danger' : (b.tone === 'success' ? 'success' : 'teal')));
-                fill.style.width = Math.max(b.pct, b.pct > 0 ? 2 : 0) + '%';
-                track.appendChild(fill);
-                item.appendChild(track);
-                list.appendChild(item);
-            });
-            C.setHidden(list, !(r.brands || []).length);
-
-            C.setText($('cost'), view.cost.text);
-            C.setText($('services-checked'), view.services.checkedText);
-            var services = $('services');
-            C.clear(services);
-            view.services.items.forEach(function (s) {
-                var item = C.el(doc, 'li', 'lq-status');
-                item.appendChild(C.el(doc, 'span', 'lq-dot lq-dot--' + (s.tone || 'muted')));
-                var name = C.el(doc, 'span', 'lq-home-services__name', s.name);
-                name.setAttribute('dir', 'ltr');
-                item.appendChild(name);
-                item.appendChild(C.el(doc, 'span', 'lq-status__note', s.label));
-                services.appendChild(item);
-            });
-            C.setHidden(services, !view.services.items.length);
         }
 
         function renderLive(view) {
-            if (C.num(view.waiting) !== null) {
-                var counts = $$('review-count');
-                for (var i = 0; i < counts.length; i++) C.setText(counts[i], view.waiting);
-                var tile = page.querySelector('[data-kpi="waiting"] [data-kpi-value]');
-                C.setText(tile, view.waiting);
-            }
-            var last = view.lastRun;
-            var card = $('lastrun');
-            card.setAttribute('data-mode', last.mode);
-            card.setAttribute('aria-busy', 'false');
-            C.setText($('lastrun-title'), last.title);
-            C.setText($('lastrun-meta'), last.meta || '');
-            C.setHidden($('lastrun-loading'), true);
-            C.setHidden($('lastrun-live'), last.mode !== 'live');
-            C.setHidden($('lastrun-summary'), last.mode !== 'summary');
-            C.setHidden($('lastrun-message'), last.mode !== 'empty' && last.mode !== 'unavailable');
-            C.setText($('lastrun-message'), last.message || '');
-            if (last.mode === 'live') {
-                C.setText($('live-phase'), last.phaseText);
-                C.setText($('live-counts'), last.countsText);
-                C.setText($('live-percent'), last.percentText);
-                var bar = $('live-bar');
-                bar.setAttribute('aria-valuenow', String(last.percent || 0));
-                $('live-fill').style.width = (last.percent || 0) + '%';
-            } else if (last.mode === 'summary') {
-                var tiles = $('lastrun-tiles');
-                C.clear(tiles);
-                last.tiles.forEach(function (t) {
-                    var tile = C.el(doc, 'div', 'lq-stat lq-stat--' + t.tone);
-                    tile.appendChild(C.el(doc, 'span', 'lq-stat__value', t.value));
-                    tile.appendChild(C.el(doc, 'span', 'lq-stat__label', t.label));
-                    tiles.appendChild(tile);
-                });
-                C.setText($('lastrun-explain'), last.explain);
-                C.setHidden($('lastrun-explain'), !last.explain);
-            }
+            if (C.num(view.waiting) === null) return;
+            var counts = $$('review-count');
+            for (var i = 0; i < counts.length; i++) C.setText(counts[i], view.waiting);
+            C.setText(page.querySelector('[data-kpi="waiting"] [data-kpi-value]'), view.waiting);
         }
 
         // the header's «افتح قائمة المراجعة» goes away while the next step already leads to the same list (one action)
@@ -511,6 +368,8 @@
             C.setText($('alert-text'), view.text);
         }
 
+        // run.js on the page (the admin's run panel) owns the /api/run/live poll and says the end of a run itself
+        var owner = page.hasAttribute && page.hasAttribute('data-run-page') && root.LaqtaRunPage ? root.LaqtaRunPage : null;
         var controller = createController({
             fetchJson: C.fetchJson,
             renderOverview: renderOverview,
@@ -519,12 +378,19 @@
             renderNext: renderNext,
             // المراجع (layout: <body data-lq-role="reviewer">): خطوات المراجعة بس
             reviewer: !!(doc.body && doc.body.getAttribute && doc.body.getAttribute('data-lq-role') === 'reviewer'),
-            toast: C.toast,
-            now: function () { return Date.now() / 1000; },
+            toast: owner ? null : C.toast,
             schedule: function (fn, ms) { return root.setTimeout(fn, ms); },
             hidden: function () { return !!doc.hidden; }
         });
 
+        controller.loadOverview(false);
+        if (owner) {
+            // run.js mounted first (its script comes first): its last snapshot, then every one it reads
+            var seen = owner.controller && owner.controller.state.snapshot;
+            if (seen) controller.handleLive(seen);
+            doc.addEventListener(owner.LIVE_EVENT, function (e) { controller.handleLive(e.detail); });
+            return controller;
+        }
         var initial = null;
         var island = doc.getElementById('lq-home-initial');
         try {
@@ -533,7 +399,6 @@
             initial = null;
         }
         if (initial) controller.handleLive(initial);
-        controller.loadOverview(false);
         root.setTimeout(controller.loop, initial ? POLL_ACTIVE_MS : 0);
         doc.addEventListener('visibilitychange', function () {
             if (!doc.hidden) controller.poll();

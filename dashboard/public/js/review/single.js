@@ -1185,10 +1185,10 @@ ${candidate.url}` : item.key, productKey: item.key, stay: stay,
             });
             const done = parseInt(data.requeued, 10) || n;
             if (thenRun) {
-                R.navigate(`${S.urls.run}?scope=rows&rows=${encodeURIComponent(rowsText(items))}`);
+                R.navigate(`${S.urls.run}?scope=rows&rows=${encodeURIComponent(rowsText(items))}#run-new`);
                 return;
             }
-            let msg = `رجعت ${R.plural(done, 'منتج واحد', 'منتجات')} للطابور. ما بتبلش معالجتها لحالها: شغّل التشغيل من صفحة «التشغيل».`;
+            let msg = `رجعت ${R.plural(done, 'منتج واحد', 'منتجات')} للطابور. ما بتبلش معالجتها لحالها: شغّل التشغيل من «اليوم».`;
             if (parseInt(data.not_found, 10) > 0) msg += ` ${data.not_found} ما لقيناها بالشيت فبقيت بالأعطال.`;
             R.toast(msg, 'success', 9000);
             R.rebuild();

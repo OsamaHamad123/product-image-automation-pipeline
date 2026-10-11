@@ -107,7 +107,8 @@ foreach (json_decode($argv[1], true) as [$method, $uri]) {{
     }}
     $out[] = ['status' => $response->getStatusCode(), 'body' => $body,
               'disposition' => $response->headers->get('Content-Disposition'),
-              'type' => $response->headers->get('Content-Type'), 'rows' => $response->headers->get('X-Laqta-Rows')];
+              'type' => $response->headers->get('Content-Type'), 'rows' => $response->headers->get('X-Laqta-Rows'),
+              'location' => $response->headers->get('Location')];
     $kernel->terminate($request, $response);
 }}
 echo json_encode($out, JSON_UNESCAPED_UNICODE);

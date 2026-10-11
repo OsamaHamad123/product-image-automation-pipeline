@@ -1,9 +1,17 @@
 /*
- * لقطة · التشغيل (resources/views/dashboard/batch_automation.blade.php).
+ * لقطة · اليوم, the admin's «التشغيل» panel and «أدوات الشيت» (resources/views/dashboard/index.blade.php; the old
+ * /batch-automation redirects there with its query, so linkedForm(?scope=…) still opens the form on a scope).
  *
- * Reads GET /api/run/live (the /api/batch-status payload the sidebar uses, plus the run's summary and latest
- * rows) every few seconds and GET /api/run/plan for «قبل ما تبدأ». Writes only through the Phase 1 run
+ * THE /api/run/live POLLER of the page: reads GET /api/run/live (the /api/batch-status payload the sidebar uses,
+ * plus the run's summary and latest rows) every few seconds and hands every snapshot on as the `lq:run-live`
+ * document event (LIVE_EVENT); home.js draws the review count, the next step and the one alert banner from it
+ * instead of polling too (it polls only for a reviewer, whose page has no run panel and loads no run.js).
+ * Reads GET /api/run/plan for «قبل ما تبدأ». Writes only through the Phase 1 run
  * controls: POST /api/run-all, /api/batch/pause, /api/batch/resume, /api/stop-batch, /api/batch/reset.
+ *
+ * «أدوات الشيت» is one card of ARIA tabs (tabStep, toolFromHash): one tool shown at a time, each tool's data read
+ * the first time its tab is shown (after the plan, which warms the sheet cache the tools read). A #run-brands /
+ * #run-barcodes / #run-quality / #run-export in the URL (or a link to it) selects that tab and scrolls to the card.
  *
  * describeLive / describePlan / runBody are pure (tests/test_laqta_run.py runs them under node);
  * createController holds the page logic with injected fetch / render / confirm so it is testable too.
@@ -14,6 +22,27 @@
     var C = root.LaqtaRunCommon;
     var POLL_ACTIVE_MS = 4000;
     var POLL_IDLE_MS = 8000;
+    // every /api/run/live snapshot this page reads, for home.js (one poll per page)
+    var LIVE_EVENT = 'lq:run-live';
+    // «أدوات الشيت»: the panels keep the ids of the old cards, so links and «روح لـ…» (GotoIndex) still land on them
+    var TOOL_IDS = ['run-brands', 'run-barcodes', 'run-quality', 'run-export'];
+
+    /* The tool a URL hash names (#run-brands …), or null. */
+    function toolFromHash(hash) {
+        var id = String(hash || '').replace(/^#/, '');
+        return TOOL_IDS.indexOf(id) !== -1 ? id : null;
+    }
+
+    /* Roving focus in a tablist (the same keys as the Health page's log tabs): Home / End, and the arrows by reading
+     * direction (in RTL ArrowLeft is the next tab). -1 for any other key. */
+    function tabStep(key, index, count, rtl) {
+        if (!(count > 0)) return -1;
+        if (key === 'Home') return 0;
+        if (key === 'End') return count - 1;
+        if (key !== 'ArrowLeft' && key !== 'ArrowRight') return -1;
+        var forward = (key === 'ArrowLeft') === (rtl !== false);
+        return (index + (forward ? 1 : count - 1)) % count;
+    }
 
     // No silent destructive button: each question (Laqta.ask) says in a sentence or two what happens and what is kept.
     var STOP_CONFIRM_TEXT = {
@@ -578,7 +607,7 @@
     /*
      * deps: fetchJson(url, opts) -> Promise<{ok,status,data}>, renderLive(view), renderPlan(view), renderStart(view),
      * confirm(question) -> bool, toast(text, variant), now() -> epoch seconds, schedule(fn, ms) -> handle,
-     * hidden() -> true while the tab is hidden (optional).
+     * hidden() -> true while the tab is hidden (optional), publish(snapshot) (optional: every snapshot read, for home.js).
      */
     function createController(deps) {
         var state = {
@@ -597,6 +626,7 @@
 
         function handleLive(snapshot) {
             state.snapshot = snapshot;
+            if (deps.publish) deps.publish(snapshot);
             var view = describeLive(snapshot, now(), state.plan && state.plan.secondsPerProduct);
             deps.renderLive(view);
             deps.renderStart({ busy: state.busy, blocked: view.startBlocked });
@@ -828,14 +858,8 @@
             setChip($('chip'), $('chip-text'), view.chip);
             C.setText($('meta'), view.meta || '');
 
-            var alert = $('alert');
-            C.setHidden(alert, !view.banner.visible);
-            if (view.banner.visible) {
-                alert.classList.toggle('lq-alert--danger', view.banner.variant === 'danger');
-                alert.classList.toggle('lq-alert--warning', view.banner.variant !== 'danger');
-                C.setText($('alert-title'), view.banner.title);
-                C.setText($('alert-text'), view.banner.text);
-            }
+            // view.banner (the run's alert) is drawn by home.js: merged with the provider alerts into the page's one
+            // banner above the run panel (home.js mergeBanner), so it is not repeated in here
 
             C.setHidden($('loading'), true);
             C.setHidden($('unavailable'), view.state !== 'unavailable');
@@ -1577,6 +1601,82 @@
             }, function () { finish('ما قدرنا نوصل للخادم.'); });
         }
 
+        /*
+         * «أدوات الشيت»: role=tablist with one tab per tool (data-run-tool-tab, aria-controls = the panel id). Each tool
+         * reads its data the first time its tab is shown, after the plan. Without the tabs (a page that lists the tools
+         * one under the other) every tool is shown, so all of them load, in the order they always did.
+         */
+        function mountTools(planned) {
+            var loaders = {
+                'run-quality': function () { return loadQuality(false); },
+                'run-brands': function () { return loadMissing(); },
+                'run-barcodes': function () { return loadBarcodes(); }
+            };
+            var tabs = typeof page.querySelectorAll === 'function'
+                ? Array.prototype.slice.call(page.querySelectorAll('[data-run-tool-tab]')) : [];
+            if (!tabs.length) {
+                planned.then(loaders['run-quality']).then(loaders['run-brands']).then(loaders['run-barcodes']);
+                return;
+            }
+            var loaded = {};
+            var card = $('tools');
+            var rtl = !(doc.documentElement && doc.documentElement.getAttribute('dir') === 'ltr');
+
+            function select(id) {
+                tabs.forEach(function (tab) {
+                    var on = tab.getAttribute('aria-controls') === id;
+                    tab.setAttribute('aria-selected', on ? 'true' : 'false');
+                    tab.tabIndex = on ? 0 : -1;
+                    C.setHidden(doc.getElementById(tab.getAttribute('aria-controls')), !on);
+                });
+                if (!loaded[id]) {
+                    loaded[id] = true;
+                    if (loaders[id]) planned.then(loaders[id]);
+                }
+            }
+
+            // a #run-… in the URL or a link: its tab, and the card in view (a hidden panel cannot be scrolled to)
+            function jump(id, focus) {
+                select(id);
+                if (card && typeof card.scrollIntoView === 'function') card.scrollIntoView({ block: 'start' });
+                var tab = doc.getElementById(id + '-tab');
+                if (focus && tab && typeof tab.focus === 'function') tab.focus({ preventScroll: true });
+            }
+
+            tabs.forEach(function (tab, i) {
+                tab.addEventListener('click', function () { select(tab.getAttribute('aria-controls')); });
+                tab.addEventListener('keydown', function (e) {
+                    var at = tabStep(e.key, i, tabs.length, rtl);
+                    if (at === -1) return;
+                    e.preventDefault();
+                    tabs[at].focus();
+                    select(tabs[at].getAttribute('aria-controls'));
+                });
+            });
+
+            var hash = root.location ? toolFromHash(root.location.hash) : null;
+            if (hash) jump(hash, false);
+            else select(tabs[0].getAttribute('aria-controls'));
+
+            if (typeof root.addEventListener === 'function') {
+                root.addEventListener('hashchange', function () {
+                    var id = toolFromHash(root.location.hash);
+                    if (id) jump(id, false);
+                });
+            }
+            // a link on this page to a tool («ضيف الماركات», «روح لـ…»): no reload, the same jump, focus on its tab
+            doc.addEventListener('click', function (e) {
+                var link = e.target && typeof e.target.closest === 'function' ? e.target.closest('a[href*="#run-"]') : null;
+                var id = link ? toolFromHash(link.hash) : null;
+                if (!id || link.pathname !== root.location.pathname || e.defaultPrevented) return;
+                e.preventDefault();
+                if (root.history && typeof root.history.pushState === 'function' && root.location.hash !== link.hash) {
+                    root.history.pushState(null, '', link.hash);
+                }
+                jump(id, true);
+            });
+        }
+
         var controller = createController({
             fetchJson: C.fetchJson,
             renderLive: renderLive,
@@ -1590,8 +1690,13 @@
             toast: C.toast,
             now: function () { return Date.now() / 1000; },
             schedule: function (fn, ms) { return root.setTimeout(fn, ms); },
-            hidden: function () { return !!doc.hidden; }
+            hidden: function () { return !!doc.hidden; },
+            publish: function (snapshot) {
+                if (typeof root.CustomEvent !== 'function' || typeof doc.dispatchEvent !== 'function') return;
+                doc.dispatchEvent(new root.CustomEvent(LIVE_EVENT, { detail: snapshot }));
+            }
         });
+        api.controller = controller;
 
         // Scope, brand, rows and the two options feed the plan.
         page.addEventListener('lq:change', function (e) {
@@ -1671,15 +1776,15 @@
         }
 
         var initial = null;
-        var island = doc.getElementById('lq-run-initial');
+        var island = doc.getElementById('lq-home-initial');
         try {
             initial = island ? JSON.parse(island.textContent || 'null') : null;
         } catch (e) {
             initial = null;
         }
-        // «جودة بيانات الشيت» بعد «قبل ما تبدأ»: الخطة تقرأ صفوف الشيت (من كاشها)، والجودة تقرأ الكاش نفسه فقط
-        controller.refreshPlan(false).then(function () { return loadQuality(false); }, function () { return loadQuality(false); })
-            .then(function () { return loadMissing(); }).then(function () { return loadBarcodes(); });
+        // الأدوات بعد «قبل ما تبدأ»: الخطة تقرأ صفوف الشيت (من كاشها)، والأدوات تقرأ الكاش نفسه فقط
+        var planned = controller.refreshPlan(false).then(function () {}, function () {});
+        mountTools(planned);
         if (initial) controller.handleLive(initial);
         controller.state.timer = root.setTimeout(controller.loop, initial ? POLL_ACTIVE_MS : 0);
         doc.addEventListener('visibilitychange', function () {
@@ -1688,7 +1793,12 @@
         return controller;
     }
 
-    root.LaqtaRunPage = {
+    var api = root.LaqtaRunPage = {
+        LIVE_EVENT: LIVE_EVENT,
+        TOOL_IDS: TOOL_IDS,
+        toolFromHash: toolFromHash,
+        tabStep: tabStep,
+        controller: null,
         STOP_CONFIRM_TEXT: STOP_CONFIRM_TEXT,
         RESET_CONFIRM_TEXT: RESET_CONFIRM_TEXT,
         FORCE_CONFIRM_TEXT: FORCE_CONFIRM_TEXT,

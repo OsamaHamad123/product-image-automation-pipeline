@@ -136,7 +136,7 @@
         {{ $fieldError('model_prices') }}
     </fieldset>
 
-    <p class="lq-settings-card__note">نماذج Claude بتحتاج مفتاح Anthropic، ونماذج Gemini مفتاح Gemini: ضيفهم من تبويب <a class="lq-link" href="{{ route('dashboard.settings') }}?tab=keys">المفاتيح</a>. التكلفة الفعلية لكل نموذج بصفحة <a class="lq-link" href="{{ route('dashboard.diagnostics') }}">الصحة والتكلفة</a>.</p>
+    <p class="lq-settings-card__note">نماذج Claude بتحتاج مفتاح Anthropic، ونماذج Gemini مفتاح Gemini: ضيفهم من تبويب <a class="lq-link" href="{{ route('dashboard.system', ['tab' => 'keys']) }}">المفاتيح</a>. التكلفة الفعلية لكل نموذج بـ<a class="lq-link" href="{{ route('dashboard.system', ['tab' => 'search']) }}#search-ops">عمليات البحث</a>.</p>
 
     <div class="lq-settings-card__actions">
         <x-lq.button type="submit" icon="check" :disabled="(bool) $dbError">حفظ</x-lq.button>

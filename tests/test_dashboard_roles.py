@@ -3,7 +3,8 @@ the login cookie jar of test_dashboard_login and a stub cli_bridge:
 
 * the migration gives every user that was there before it the admin role, and an admin still does everything;
 * a reviewer approves, rejects, undoes a reject and dismisses a failed approval, but settings, runs, the Sheet and
-  every other write answer 403 (JSON for the API, a page for a form) and never reach the bridge;
+  every other write answer 403 (JSON for the API, a page for a form) and never reach the bridge; on «النظام» he gets
+  the «الحالة» sections only (an admin section answers with the status one, test_system_page.py);
 * a reviewer's pages carry no link to the admin pages;
 * `laqta:user NAME --role=reviewer` makes a reviewer, `--role=admin` on an existing user changes only the role,
   `--list` shows the roles and an unknown role is refused.
@@ -77,9 +78,9 @@ def test_users_from_before_the_roles_are_admins(env):
     finally:
         migrate(environ, "up")
     assert role_of(db, ADMIN) == "admin"
-    _login, settings, sheet = run(environ, [login(ADMIN, password), ["GET", "/settings"],
-                                            ["POST", "/api/sheet/save", {}]])
-    assert settings["status"] == 200
+    _login, settings, sheet = run(environ, [login(ADMIN, password), ["GET", "/system?tab=keys"],
+                                            ["POST", "/api/sheet/save", {}]], body=400000)
+    assert settings["status"] == 200 and re.search(r'data-system-tab="keys"\s+aria-current="page"', settings["body"])
     assert sheet["status"] != 403
 
 
@@ -94,7 +95,8 @@ def test_a_reviewer_reviews_but_admin_work_is_refused(env):
         ["POST", "/api/approval-jobs/987654/dismiss"],
         ["GET", "/catalog"],
         ["POST", "/settings", {"serper_api_key": "x"}],
-        ["GET", "/settings"],
+        ["GET", "/system?tab=keys"],
+        ["GET", "/api/setup/state"],
         ["POST", "/api/run-all"],
         ["POST", "/api/stop-batch"],
         ["POST", "/api/sheet/save", {"spreadsheet_url": "https://docs.google.com/x", "tab_name": "Sheet1"}],
@@ -103,12 +105,15 @@ def test_a_reviewer_reviews_but_admin_work_is_refused(env):
         ["POST", "/api/run/brand-add", {"brand": "X"}],
         ["GET", "/batch-automation"],
         ["POST", "/logout"],
-    ])
+    ], body=400000)
     approve, reject, undo, dismiss, catalog = out[1:6]
     assert approve["status"] == 202 and reject["status"] == 200 and undo["status"] == 200
     assert dismiss["status"] != 403 and catalog["status"] == 200
     form, page, *apis, run_page, logout = out[6:]
-    assert form["status"] == 403 and page["status"] == 403 and DENIED in form["body"] and "<html" in form["body"]
+    assert form["status"] == 403 and DENIED in form["body"] and "<html" in form["body"]
+    # «النظام» › «المفاتيح» is an admin section: the reviewer gets «الحالة الآن» instead (no 403 page, no key form)
+    assert page["status"] == 200 and 'data-tab="status"' in page["body"] and 'data-system-tab="keys"' not in page["body"]
+    assert "data-key-form" not in page["body"]
     assert run_page["status"] == 403
     for res in apis:
         assert res["status"] == 403 and json.loads(res["body"]) == {"status": "error", "error": DENIED}
@@ -129,9 +134,12 @@ def test_a_reviewer_sees_no_admin_links(env):
     for page in (as_reviewer, as_admin):
         assert page["status"] == 200
     assert 'data-lq-role="reviewer"' in as_reviewer["body"]
-    for link in ("/settings", "/batch-automation"):
+    for link in ("/settings", "#run-current"):      # the run panel on «اليوم» (sidebar run card, «روح لـ…»)
         assert f'{link}"' not in as_reviewer["body"]
-        assert f'{link}"' in as_admin["body"]
+    assert '#run-current"' in as_admin["body"]                         # the sidebar run card's link to «اليوم»
+    # «النظام» is in both navs (the reviewer sees its «الحالة» sections only)
+    for page in (as_reviewer, as_admin):
+        assert '/system"' in page["body"]
     # the review screen's config (data-config, HTML-escaped JSON): no «back to the queue» for a reviewer
     assert "&quot;retry&quot;:&quot;&quot;" in as_reviewer["body"] and "/api/failures/retry" in as_admin["body"]
 
@@ -169,8 +177,8 @@ def test_the_role_flags_of_laqta_user(env):
     out = artisan(environ, "laqta:user", REVIEWER, "--role=admin")
     assert "صار" in out and "كلمة السر" not in out
     assert role_of(db, REVIEWER) == "admin"
-    _login, settings = run(environ, [login(REVIEWER, password), ["GET", "/settings"]])    # same password, more rights
-    assert settings["status"] == 200
+    _login, settings = run(environ, [login(REVIEWER, password), ["GET", "/system?tab=keys"]], body=400000)  # more rights
+    assert settings["status"] == 200 and re.search(r'data-system-tab="keys"\s+aria-current="page"', settings["body"])
 
     bad = subprocess.run([PHP, "artisan", "laqta:user", REVIEWER, "--role=owner"], cwd=DASH, env=environ,
                          capture_output=True, text=True, timeout=120, encoding="utf-8")

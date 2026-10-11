@@ -48,7 +48,7 @@ def test_retry_texts_do_not_promise_an_immediate_run():
     assert "إعادة المحاولة بترجّعه للطابور، وبينبحث عنه بالتشغيل الجاي." in single
 
     retry_api = _method(read(API), "retryFailures")
-    assert "طابور الأتمتة" in retry_api and "من صفحة «التشغيل»" in retry_api
+    assert "طابور الأتمتة" in retry_api and "من «اليوم»" in retry_api
     assert "التحكم والأتمتة الجماعية" not in retry_api          # the old page name is gone
     assert "فوراً" not in retry_api
 
@@ -86,4 +86,4 @@ out.confirms = confirms.length;
     assert "SEARCH_ERROR" not in out["text"].replace("SEARCH_ERROR: search raised an exception", "")
     assert out["body"] == {"barcodes": ["6291003000017"]}
     assert out["confirms"] == 0                        # one explicit button for one row
-    assert out["toasts"] == ["رجعت منتج واحد للطابور. ما بتبلش معالجتها لحالها: شغّل التشغيل من صفحة «التشغيل»."]
+    assert out["toasts"] == ["رجعت منتج واحد للطابور. ما بتبلش معالجتها لحالها: شغّل التشغيل من «اليوم»."]

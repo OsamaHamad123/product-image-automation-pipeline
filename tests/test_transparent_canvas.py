@@ -574,7 +574,7 @@ def test_the_settings_form_validates_the_background_on_the_server(app_env):
                                    "output_background": "<script>"}],
             ["POST", "/settings", {"section": "processing", "output_canvas_size": "800",
                                    "bg_removal_method": "photoroom"}],                       # an older form: kept
-            ["GET", "/settings?tab=processing", {}],
+            ["GET", "/system?tab=processing", {}],
         ])
         assert not out[0]["flash"]["warnings"] and _settings(db)["output_background"] == "white"
         assert out[1]["flash"]["warnings"] == ["خلفية الصورة هاي مش مدعومة؛ ما تغيّرت المحفوظة."]

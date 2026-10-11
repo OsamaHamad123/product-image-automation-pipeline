@@ -1,8 +1,9 @@
-"""The simpler Health page: «كلشي تمام» or a short «شو بدو منك» list on top (HealthAttentionController), every detailed
-card under «تفاصيل متقدمة», collapsed by default, and nothing lost.
+"""The Health sections of «النظام»: «كلشي تمام» or a short «شو بدو منك» list on top of «الحالة الآن»
+(HealthAttentionController), every detailed card on its own section (?tab=), and nothing lost.
 
-- Structure: the top comes first, the advanced section holds every card and action that was on the page, each
-  item's in-page button lands on a card that exists, and opening the page still runs no Python.
+- Structure: the top comes first on the status section, every card and action that was on the page is on one of the
+  sections, each item's fix links to the section that holds it (and lands on a card and a button that exist there),
+  and opening the page still runs no Python.
 - The items are a pure function of the existing sources (ops_health alerts, the last connection check, DEAD sheet
   writes, disk, the nightly age, the last run and the daily budget, the last publish rehearsal, background removal
   switched off, the local index), each with its fix; under PHP with Laravel booted and no database.
@@ -42,9 +43,13 @@ def read(path):
     return path.read_text(encoding="utf-8")
 
 
-def _advanced(view):
-    start = view.index('<details class="lq-health-advanced" data-health="advanced">')
-    return view[start:view.rindex("</details>")]        # the service cards hold <details> of their own
+def _section(view, tab):
+    """The part of diagnostics.blade.php one section of «النظام» renders (@case('tab') … @break)."""
+    start = view.index(f"@case('{tab}')")
+    return view[start:view.index("@break", start)]
+
+
+SECTIONS = ("status", "search", "logs", "publish", "index", "eval", "recut")
 
 
 # ---------------------------------------------------------------------------
@@ -55,21 +60,20 @@ def test_the_route_the_page_data_and_no_python_on_open():
     c = "\\App\\Http\\Controllers\\HealthAttentionController"
     assert f"Route::get('/api/system/attention', [{c}::class, 'show']);" in read(ROUTES)
     php = read(HEALTH_PHP)
-    page = php[php.index("public function page()"):php.index("public static function bgProblem(")]
+    page = php[php.index("public static function pageData("):php.index("public static function bgProblem(")]
     assert "'attention' => HealthAttentionController::current()," in page and "PythonBridge" not in page
     # the top reads ops-health from the cache only; the page script asks again once ops-health answered
     attention = read(ATTENTION_PHP)
     assert "PythonBridge" not in attention and "Cache::get(HealthController::CACHE_KEY)" in attention
 
 
-def test_the_top_comes_first_and_every_card_stays_reachable_under_the_advanced_section():
+def test_the_top_comes_first_and_every_card_stays_reachable_on_a_section():
     view = read(VIEW)
-    top = view.index('data-health="now"')
-    advanced = _advanced(view)
-    assert top < view.index('<details class="lq-health-advanced"')
-    # collapsed by default: no open attribute
-    assert re.search(r'<details class="lq-health-advanced" data-health="advanced">', view)
-    assert "تفاصيل متقدمة" in advanced
+    status = _section(view, "status")
+    assert status.index('data-health="now"') < status.index('id="services"')
+    # no collapsed «تفاصيل متقدمة» and no «روح على» row any more: each card is on its section
+    assert "lq-health-advanced" not in view and "تفاصيل متقدمة" not in view and "x-lq.jump-links" not in view
+    every = "".join(_section(view, tab) for tab in SECTIONS)
     # every card and action of the page before: the connection check and the service cards, «فحص النشر» and its
     # background-removal box, the last run, the lanes, the local index, «عمليات البحث», the log, the test set
     for hook in ('data-health="run-check"', "@foreach ($services as $service)", 'id="card-{{ $service[\'key\'] }}"',
@@ -78,12 +82,13 @@ def test_the_top_comes_first_and_every_card_stays_reachable_under_the_advanced_s
                  'data-health="index-refresh"', 'data-health="ops"', 'data-health="window"', 'data-health="ops-retry"',
                  'data-log-tab="pipeline"', 'data-log-tab="laravel"', 'data-log-tab="nightly"', 'data-health="eval-export"',
                  'data-health="eval-export-link"', 'id="lq-health-initial"', 'id="publish-check-initial"'):
-        assert hook in advanced, hook
-    # nothing detailed is left above the section, and one more card drops in at its end
-    head = view[:view.index('<details class="lq-health-advanced"')]
-    for hook in ('data-health="run-check"', 'id="publish-check"', 'data-health="ops"', 'data-health="log"'):
-        assert hook not in head, hook
-    assert advanced.rstrip().endswith("</div>") and "بطاقات متقدمة إضافية بتنحط هون" in advanced
+        assert hook in every, hook
+    # each card on the section SystemController::CARD_TABS names
+    for card, tab in (("services", "status"), ("last-run", "status"), ("lanes", "status"), ("search-ops", "search"),
+                      ("logs", "logs"), ("publish-check", "publish"), ("local-index", "index"), ("eval-export", "eval"),
+                      ("reprocess", "recut")):
+        for other in SECTIONS:
+            assert (f'id="{card}"' in _section(view, other)) == (other == tab), (card, other)
 
 
 def test_every_in_page_fix_lands_on_a_card_and_a_button_that_exist():
@@ -91,13 +96,20 @@ def test_every_in_page_fix_lands_on_a_card_and_a_button_that_exist():
     goto = re.search(r"var GOTO = \{(.*?)\};", js, re.DOTALL).group(1)
     pairs = re.findall(r"'?([a-z-]+)'?: \['([^']+)', '([^']+)'\]", goto)
     assert {p[0] for p in pairs} == {"services", "publish-check", "bg-restore", "index-card", "log-nightly"}
-    advanced = _advanced(view)
-    for _, card, button in pairs:
+    # each fix is on the section its link names (SystemController::GOTO: services -> status, publish-check and
+    # bg-restore -> publish, index-card -> index, log-nightly -> logs)
+    tabs = {"services": "status", "publish-check": "publish", "bg-restore": "publish", "index-card": "index",
+            "log-nightly": "logs"}
+    system = read(CONTROLLERS / "SystemController.php")
+    for key, tab in tabs.items():
+        assert re.search(rf"'{key}' => \['{tab}', '[a-z-]+'\]", system), key
+    for key, card, button in pairs:
+        section = _section(view, tabs[key])
         for selector in (card, button):
             if selector.startswith("#"):
-                assert f'id="{selector[1:]}"' in advanced, selector
+                assert f'id="{selector[1:]}"' in section, selector
             else:
-                assert selector[1:-1].replace('"', '"') in advanced, selector
+                assert selector[1:-1].replace('"', '"') in section, selector
     php = read(ATTENTION_PHP)
     used = set(re.findall(r"'goto' => '([a-z-]+)'", php))
     assert used - {"reload"} <= {p[0] for p in pairs}, used
@@ -108,10 +120,11 @@ def test_the_top_has_its_hooks_classes_and_no_raw_codes():
     for hook in ("now", "now-title", "now-text", "now-items", "now-note"):
         assert f'data-health="{hook}"' in view, hook
     assert '<script type="application/json" id="lq-health-attention-initial">@json($attention)</script>' in view
-    for cls in ("lq-health-now", "lq-health-now__icon", "lq-health-todo", "lq-health-todo__fix", "lq-health-advanced__label",
-                "lq-health-advanced__hint", "lq-health__checkbar", "lq-health-eval"):
+    for cls in ("lq-health-now", "lq-health-now__icon", "lq-health-todo", "lq-health-todo__fix", "lq-health__checkbar",
+                "lq-health-eval"):
         assert re.search(r"\." + re.escape(cls) + r"[\s,\[{:]", css), cls
-    top = view[view.index('data-health="now"'):view.index('<details class="lq-health-advanced"')]
+    assert "lq-health-advanced" not in css and "lq-health__jump" not in css
+    top = view[view.index('data-health="now"'):view.index('id="services"')]
     for code in ("SERPER_CREDIT", "GEMINI_DOWN", "VERIFIER_BUDGET", "VERIFIER_KEY", "DEAD", "budget_reached"):
         assert code not in top, code
 
@@ -211,15 +224,19 @@ def test_each_source_gives_an_item_with_its_fix():
                                 index_rows={"lulu": {"ok_age_s": 20 * 86400}}),
     })
     db = out["db"]["items"][0]
-    assert db["key"] == "db" and db["tone"] == "danger" and db["action"] == {"label": "حدّث الصفحة", "href": "", "goto": "reload"}
+    assert db["key"] == "db" and db["tone"] == "danger"
+    assert db["action"] == {"label": "حدّث الصفحة", "href": "", "goto": "reload", "admin": False}
     assert _keys(out["ops"]) == ["ops_serper_credit", "ops_verifier_budget"]
-    assert out["ops"]["items"][0]["action"]["href"] == "/settings?tab=keys#lq-key-serper"
-    assert out["ops"]["items"][1]["action"]["href"] == "/settings?tab=models"
+    assert out["ops"]["items"][0]["action"]["href"] == "/system?tab=keys#lq-key-serper"
+    assert out["ops"]["items"][1]["action"]["href"] == "/system?tab=models"
+    assert out["ops"]["items"][0]["action"]["admin"] is True          # a settings tab: hidden from a reviewer
     services = out["services"]["items"][0]
     assert services["title"] == "Gemini وCloudinary ما ردّوا بآخر فحص للاتصالات"
     assert services["action"]["goto"] == "services" and "آخر فحص:" in services["text"]
+    assert services["action"]["href"] == "/system?tab=status&goto=services#services" and services["action"]["admin"] is False
     dead = out["dead"]["items"][0]
-    assert dead["title"] == "3 روابط ما وصلوا للشيت" and dead["action"]["href"] == "/batch-automation#run-new"
+    assert dead["title"] == "3 روابط ما وصلوا للشيت" and dead["action"]["href"] == "/#run-new"
+    assert dead["action"]["admin"] is True
     assert out["dead_old"]["items"] == [] and out["disk_unknown"]["items"] == [] and out["never"]["items"] == []
     # writes the sheet refused because a row or a column changed: a warning with what happens next, never silent
     conflict = out["conflict"]["items"][0]
@@ -233,10 +250,16 @@ def test_each_source_gives_an_item_with_its_fix():
     assert _keys(out["budget"]) == ["spend"] and out["budget"]["items"][0]["tone"] == "warning"
     assert out["nightly"]["items"][0]["title"] == "التشغيل الليلي ما اشتغل من 30 ساعة"
     assert out["nightly"]["items"][0]["action"]["goto"] == "log-nightly"
+    assert out["nightly"]["items"][0]["action"]["href"] == "/system?tab=logs&goto=log-nightly#logs"
+    assert out["disk"]["items"][0]["action"]["href"] == "/system?tab=logs&goto=log-nightly#logs"
     publish = out["publish"]["items"][0]
     assert publish["text"] == "الرفع على Cloudinary ما زبط." and publish["action"]["goto"] == "publish-check"
-    assert out["bg_off"]["items"][0]["action"] == {"label": "رجّع عزل الخلفية", "href": "", "goto": "bg-restore"}
+    assert publish["action"]["href"] == "/system?tab=publish&goto=publish-check#publish-check"
+    assert publish["action"]["admin"] is True
+    assert out["bg_off"]["items"][0]["action"] == {"label": "رجّع عزل الخلفية", "goto": "bg-restore", "admin": True,
+                                                   "href": "/system?tab=publish&goto=bg-restore#publish-check"}
     assert out["index"]["items"][0]["text"].startswith("آخر جمع ناجح من 20 يوم")
+    assert out["index"]["items"][0]["action"]["href"] == "/system?tab=index&goto=index-card#local-index"
     assert out["index_running"]["items"] == []
     for name, view in out.items():
         if view["items"]:
@@ -339,12 +362,12 @@ echo json_encode($out, JSON_UNESCAPED_UNICODE);
 
 
 def test_the_page_opens_on_the_top_and_runs_no_python(health_app):
-    (page,) = _kernel(health_app["env"], ["/system-diagnostics"])
-    assert page["status"] == 200
+    page, publish = _kernel(health_app["env"], ["/system", "/system?tab=publish"])
+    assert page["status"] == 200 and publish["status"] == 200
     body = page["body"]
-    assert body.index('data-health="now"') < body.index('data-health="advanced"')
-    assert re.search(r'<details class="lq-health-advanced" data-health="advanced">\s*<summary', body)
-    assert "تفاصيل متقدمة" in body and "فحص الاتصالات الآن" in body and "افحص النشر" in body
+    assert body.index('data-health="now"') < body.index('id="services"')
+    assert "lq-health-advanced" not in body and "تفاصيل متقدمة" not in body
+    assert "فحص الاتصالات الآن" in body and "افحص النشر" in publish["body"]
     initial = json.loads(re.search(r'id="lq-health-attention-initial">(.*?)</script>', body, re.DOTALL).group(1))
     assert initial["state"] in ("checking", "attention") and initial["pending"] is True
     assert not health_app["calls"].exists()
@@ -362,12 +385,12 @@ def test_a_dead_write_and_a_provider_outage_reach_the_top(health_app):
     assert json.loads(ops["body"])["status"] == "success"
     assert {"outbox", "ops_serper_credit"} <= set(_keys(last)) and last["pending"] is False
     serper = next(i for i in last["items"] if i["key"] == "ops_serper_credit")
-    assert serper["title"] == "رصيد Serper خلص أو المفتاح مرفوض" and serper["action"]["href"] == "/settings?tab=keys#lq-key-serper"
+    assert serper["title"] == "رصيد Serper خلص أو المفتاح مرفوض" and serper["action"]["href"] == "/system?tab=keys#lq-key-serper"
     assert health_app["calls"].read_text(encoding="utf-8").split() == ["ops_health"]
 
 
 def test_without_the_database_the_top_says_so(health_app):
-    page, attention = _kernel(dict(health_app["env"], DB_PORT="1"), ["/system-diagnostics", "/api/system/attention"])
+    page, attention = _kernel(dict(health_app["env"], DB_PORT="1"), ["/system", "/api/system/attention"])
     assert page["status"] == 200 and "قاعدة البيانات ما بتردّ" in page["body"]
     body = json.loads(attention["body"])
     assert body["state"] == "attention" and _keys(body)[0] == "db"
@@ -394,5 +417,6 @@ console.log(JSON.stringify({
     out = json.loads(result.stdout.strip().splitlines()[-1])
     assert out["ok"] == {"state": "ok", "title": "كلشي تمام", "text": "t", "items": [], "note": "", "pending": False}
     assert out["items"]["items"] == [{"key": "outbox", "tone": "danger", "title": "x", "text": "y",
-                                      "action": {"label": "صفحة التشغيل", "href": "/batch-automation", "goto": ""}}]
+                                      "action": {"label": "صفحة التشغيل", "href": "/batch-automation", "goto": "",
+                                                 "admin": False}}]
     assert out["bad"] == [None, None] and out["url"] == "/api/system/attention"

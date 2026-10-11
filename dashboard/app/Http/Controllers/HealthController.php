@@ -43,27 +43,39 @@ class HealthController extends Controller
         'google_search' => 'Google Custom Search (قديم)',
     ];
 
-    public function page()
+    /**
+     * بيانات قسم من أقسام الصحة بصفحة «النظام» (SystemController::HEALTH_TABS، diagnostics.blade.php): كل قسم بيقرأ
+     * اللي بيعرضه بس. status: «شو بدو منك» والخدمات وآخر تشغيل؛ publish: «فحص النشر» وعزل الخلفية؛ index: الفهرس.
+     */
+    public static function pageData(string $tab): array
     {
-        $last = ProductController::lastDiagnostics();
-        $publish = self::publicPublishCheck(self::lastPublishCheck(), SettingsController::secretValues());
-        $bg = SettingsController::currentBgState();
-        return view('dashboard.diagnostics', [
-            'lastDiagnostics' => self::publicResult($last),
-            'services' => self::serviceCards($last, self::serviceContext()),
-            'optional' => self::optionalServices($last),
-            'checkedAt' => self::checkedAt($last),
-            'allOk' => is_array($last) ? ($last['all_ok'] ?? null) : null,
-            'lastRun' => self::lastRunCard(self::lastRunRow()),
-            'localIndex' => LocalIndexController::card(),
-            'lastPublishCheck' => $publish,
-            'publish' => self::publishCheckView($publish),
-            'bg' => $bg,
-            'bgView' => self::bgSkipView($publish, $bg),
-            'bgConfirm' => SettingsController::BG_SKIP_CONFIRM,
-            // «كلشي تمام» / «شو بدو منك» فوق الصفحة (بلا بايثون: ops-health من الكاش بس)
-            'attention' => HealthAttentionController::current(),
-        ]);
+        $data = ['healthTab' => $tab];
+        if ($tab === 'status') {
+            $last = ProductController::lastDiagnostics();
+            $data += [
+                'lastDiagnostics' => self::publicResult($last),
+                'services' => self::serviceCards($last, self::serviceContext()),
+                'optional' => self::optionalServices($last),
+                'checkedAt' => self::checkedAt($last),
+                'allOk' => is_array($last) ? ($last['all_ok'] ?? null) : null,
+                'lastRun' => self::lastRunCard(self::lastRunRow()),
+                // «كلشي تمام» / «شو بدو منك» فوق القسم (بلا بايثون: ops-health من الكاش بس)
+                'attention' => HealthAttentionController::current(),
+            ];
+        } elseif ($tab === 'publish') {
+            $publish = self::publicPublishCheck(self::lastPublishCheck(), SettingsController::secretValues());
+            $bg = SettingsController::currentBgState();
+            $data += [
+                'lastPublishCheck' => $publish,
+                'publish' => self::publishCheckView($publish),
+                'bg' => $bg,
+                'bgView' => self::bgSkipView($publish, $bg),
+                'bgConfirm' => SettingsController::BG_SKIP_CONFIRM,
+            ];
+        } elseif ($tab === 'index') {
+            $data['localIndex'] = LocalIndexController::card();
+        }
+        return $data;
     }
 
     // ------------------------------------------------------------------

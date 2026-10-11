@@ -1,6 +1,7 @@
 /*
- * لقطة · الرئيسية (Overview board). Page-only styles on top of public/css/laqta.css tokens and classes.
- * Loaded by resources/views/dashboard/index.blade.php through @push('styles').
+ * لقطة · اليوم (Today: the old Home and Run boards). Page-only styles on top of public/css/laqta.css tokens and classes.
+ * Loaded by resources/views/dashboard/index.blade.php through @push('styles'); the admin's run panel and sheet tools
+ * also load public/css/pages/run.css.
  */
 
 .lq-home {
@@ -28,24 +29,6 @@
     border-radius: var(--lq-radius-pill);
 }
 
-.lq-home__skel-tile {
-    height: 74px;
-    border-radius: var(--lq-radius-lg);
-}
-
-.lq-home__skel-inline {
-    display: inline-block;
-    width: 56px;
-    height: 12px;
-    vertical-align: middle;
-}
-
-.lq-home__message {
-    font-size: var(--lq-fs-xs);
-    line-height: var(--lq-lh-relaxed);
-    color: var(--lq-text-2);
-}
-
 /* Sheet funnel */
 .lq-home-funnel__body {
     display: flex;
@@ -69,140 +52,67 @@
     color: var(--lq-text-2);
 }
 
-/* Last run + readiness */
-.lq-home__grid {
-    display: grid;
-    grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
-    gap: var(--lq-space-4);
-    align-items: start;
-}
-
-.lq-home-tiles {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(96px, 1fr));
-    gap: 10px;
-}
-
-.lq-home-lastrun__summary,
-.lq-home-lastrun__live {
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-}
-
-.lq-home-lastrun__explain,
-.lq-home-lastrun__phase {
-    font-size: var(--lq-fs-xs);
-    line-height: var(--lq-lh-relaxed);
-    color: var(--lq-text-2);
-}
-
-.lq-home-lastrun__live .lq-link {
-    align-self: flex-start;
-    font-size: var(--lq-fs-xs);
-}
-
-.lq-home-ready {
-    gap: var(--lq-space-3);
-}
-
-.lq-home-ready__link {
-    font-size: var(--lq-fs-xs);
-}
-
-.lq-home-ready__intro {
-    font-size: var(--lq-fs-xs);
-    line-height: var(--lq-lh-base);
-    color: var(--lq-text-2);
-}
-
-.lq-home-ready__list {
+/* «التشغيل»: the section title over the new-run and current-run cards (their grid is run.css .lq-run__grid) */
+.lq-today-run {
     display: flex;
     flex-direction: column;
     gap: var(--lq-space-3);
-    margin: 0;
-    padding: 0;
-    list-style: none;
+    min-width: 0;
 }
 
-.lq-home-ready__item {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
+/* «أدوات الشيت»: one raised card, a row of ARIA tabs, one tool panel shown at a time. A #run-… jump scrolls the card
+   (run.js) and leaves a little room above it. */
+.lq-today-tools {
+    scroll-margin-block-start: var(--lq-space-4);
 }
 
-.lq-home-ready__head {
+.lq-today-tools__tabs {
     display: flex;
     flex-wrap: wrap;
-    justify-content: space-between;
-    gap: 2px var(--lq-space-3);
-    font-size: var(--lq-fs-xs);
+    gap: var(--lq-space-1);
+    padding-block-end: var(--lq-space-2);
+    border-block-end: 1px solid var(--lq-border-soft);
 }
 
-.lq-home-ready__brand {
-    font-weight: 500;
-}
-
-.lq-home-ready__text {
+.lq-body .lq-today-tools__tab,
+.lq-today-tools__tab {
+    padding: var(--lq-space-2) var(--lq-space-3);
+    border: 0;
+    border-radius: var(--lq-radius-sm);
+    background: transparent;
     color: var(--lq-text-2);
-}
-
-.lq-home-ready .lq-progress--sm {
-    height: 7px;
-}
-
-/* Services strip */
-.lq-home-services {
-    flex-direction: row;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: var(--lq-space-3) 22px;
-    padding: var(--lq-card-pad-compact) var(--lq-card-pad);
-}
-
-.lq-body .lq-home-services__title {
+    font: inherit;
     font-size: var(--lq-fs-sm);
-    font-weight: 600;
+    font-weight: 500;
+    cursor: pointer;
 }
 
-.lq-home-services__list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: var(--lq-space-2) 22px;
-    margin: 0;
-    padding: 0;
-    list-style: none;
-}
-
-.lq-home-services__name {
-    unicode-bidi: isolate;
-}
-
-.lq-body .lq-home-services__checked {
-    font-size: var(--lq-fs-xs);
-    color: var(--lq-text-3);
-    text-decoration: none;
-}
-
-.lq-body .lq-home-services__checked:hover {
-    color: var(--lq-accent);
-    text-decoration: underline;
-}
-
-.lq-home-services__cost {
-    margin-inline-start: auto;
-    font-size: var(--lq-fs-xs);
-    color: var(--lq-text-2);
-}
-
-.lq-home-services__cost strong {
+.lq-today-tools__tab:hover {
     color: var(--lq-text);
+    background: var(--lq-surface-2);
+}
+
+.lq-today-tools__tab[aria-selected="true"] {
+    color: var(--lq-accent);
+    background: var(--lq-accent-wash);
     font-weight: 600;
+}
+
+.lq-today-tools__panel {
+    display: flex;
+    flex-direction: column;
+    gap: var(--lq-space-3);
+    min-width: 0;
 }
 
 @media (max-width: 980px) {
-    .lq-home__grid {
-        grid-template-columns: minmax(0, 1fr);
+    .lq-today-tools__tabs {
+        flex-wrap: nowrap;
+        overflow-x: auto;
+    }
+
+    .lq-today-tools__tab {
+        flex-shrink: 0;
     }
 }
 
@@ -224,12 +134,8 @@
         padding: 14px;
     }
 
-    .lq-home-tiles {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .lq-home-services__cost {
-        margin-inline-start: 0;
+    .lq-today-tools__tab {
+        padding-inline: var(--lq-space-2);
     }
 }
 

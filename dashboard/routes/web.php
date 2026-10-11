@@ -19,9 +19,11 @@ Route::get('/catalog', [ReviewController::class, 'page'])->name('dashboard.catal
 Route::get('/active-learning', [ProductController::class, 'activeLearning'])->name('dashboard.active_learning'); // p2-health: ← /settings?tab=auto-publish
 Route::get('/errors', [ProductController::class, 'errors'])->name('dashboard.errors'); // ← /catalog?filter=failed
 Route::get('/rich-catalog', [ProductController::class, 'richCatalog'])->name('dashboard.rich_catalog'); // ← /catalog
-Route::get('/batch-automation', [RunController::class, 'page'])->name('dashboard.batch_automation'); // p2-run: التشغيل (?tab=review -> /catalog?mode=bulk)
-Route::get('/system-diagnostics', [\App\Http\Controllers\HealthController::class, 'page'])->name('dashboard.diagnostics'); // p2-health: الصحة والتكلفة
-Route::get('/settings', [\App\Http\Controllers\SettingsController::class, 'show'])->name('dashboard.settings'); // p2-health: ?tab=
+Route::get('/batch-automation', [RunController::class, 'page'])->name('dashboard.batch_automation'); // 302 to «اليوم» / with the query (?tab=review -> /catalog?mode=bulk)
+// «النظام»: الصحة والإعدادات والتجهيز بصفحة وحدة بشريط جانبي (?tab=، SystemController::GROUPS). العناوين القديمة بتحوّل لهون
+Route::get('/system', [\App\Http\Controllers\SystemController::class, 'show'])->name('dashboard.system');
+Route::get('/system-diagnostics', [\App\Http\Controllers\SystemController::class, 'diagnostics'])->name('dashboard.diagnostics'); // -> /system
+Route::get('/settings', [\App\Http\Controllers\SystemController::class, 'settings'])->name('dashboard.settings'); // -> /system?tab=…
 Route::post('/settings', [\App\Http\Controllers\SettingsController::class, 'save'])->name('dashboard.save_settings'); // p2-health
 // «تجاوز عزل الخلفية» / «رجّع عزل الخلفية» (صفحة الصحة، شاشة المراجعة، تبويب «معالجة الصور»): {method} من BG_METHODS
 Route::post('/api/settings/bg-method', [\App\Http\Controllers\SettingsController::class, 'setBgMethod']);
@@ -125,8 +127,8 @@ Route::post('/api/cutout/discard', [\App\Http\Controllers\RecutController::class
 Route::post('/api/cutout/undo', [\App\Http\Controllers\RecutController::class, 'undo']);
 Route::get('/api/cutout/preview/{token}', [\App\Http\Controllers\RecutController::class, 'preview'])
     ->where('token', '[0-9a-f]{32}');
-// «جهّز لقطة»: معالج التجهيز لأول مرة (SetupController). فتح الصفحة ما بيشغّل أي فحص: كل فحص بزر صريح، والتقدّم بـ system_settings
-Route::get('/setup', [\App\Http\Controllers\SetupController::class, 'page'])->name('dashboard.setup');
+// «جهّز لقطة»: معالج التجهيز لأول مرة (SetupController، قسم setup بـ«النظام»). فتح الصفحة ما بيشغّل أي فحص: كل فحص بزر صريح، والتقدّم بـ system_settings
+Route::get('/setup', [\App\Http\Controllers\SystemController::class, 'setup'])->name('dashboard.setup'); // -> /system?tab=setup(&step=)
 Route::get('/api/setup/state', [\App\Http\Controllers\SetupController::class, 'state']);
 Route::post('/api/setup/check', [\App\Http\Controllers\SetupController::class, 'check']);
 Route::post('/api/setup/progress', [\App\Http\Controllers\SetupController::class, 'progress']);
