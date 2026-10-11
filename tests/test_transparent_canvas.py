@@ -597,7 +597,7 @@ def test_the_settings_form_validates_the_background_on_the_server(app_env):
 def test_the_review_page_loads_the_toggle_script():
     page = (ROOT / "dashboard" / "resources" / "views" / "dashboard" / "catalog.blade.php").read_text(encoding="utf-8")
     assert "$rvVersion('js/review/theme_preview.js')" in page
-    assert page.index("theme_preview.js") < page.index("['core', 'ui', 'jobs', 'single', 'bulk', 'app']")
+    assert page.index("theme_preview.js") < page.index("['core', 'ui', 'jobs', 'single', 'bulk', 'cutout', 'app']")
 
 
 def test_the_approved_view_has_the_theme_toggle(tmp_path):
