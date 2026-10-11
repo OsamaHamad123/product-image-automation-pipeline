@@ -19,6 +19,9 @@
     The sidebar run card and the review badge poll GET /api/batch-status every 5 s (15 s on «اليوم», which polls
     /api/run/live itself; none while the tab is hidden). Pages can reuse that one poll instead of starting their
     own: window.Laqta.onRunStatus(fn) or the `lq:run-status` document event.
+    Theme: <html data-theme="light|dark"> (none = follow the system), set before the first paint by js/theme-boot.js
+    from localStorage «laqta.theme»; the «فاتح / غامق / تلقائي» switch (sidebar foot, and «حسابي» on the phone) calls
+    window.Laqta.setTheme. laqta.css swaps only the colour tokens.
     At 980px and below the sidebar is a bottom tab bar: «حسابي» opens the name and «خروج» (the same logout form), and
     the owner's run tab carries a status dot.
 --}}
@@ -43,6 +46,8 @@
     }
     $lqReviewSeed = isset($lqReviewCount) && is_numeric($lqReviewCount) ? max(0, (int) $lqReviewCount) : null;
     $lqCssVersion = @filemtime(public_path('css/laqta.css')) ?: '1';
+    // المظهر: layout.js (setTheme) بيحفظ الاختيار بـ localStorage (laqta.theme) وبيعلّم الزر المختار
+    $lqThemes = ['light' => 'فاتح', 'dark' => 'غامق', 'system' => 'تلقائي'];
 @endphp
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
@@ -50,8 +55,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
-    <meta name="color-scheme" content="light">
+    <meta name="color-scheme" content="light dark">
     <meta name="theme-color" content="#0B2226">
+    {{-- المظهر (فاتح / غامق / تلقائي) قبل أول رسم: سكربت صغير متزامن قبل الـ CSS، بيقرأ laqta.theme --}}
+    <script src="{{ asset('js/theme-boot.js') }}?v={{ @filemtime(public_path('js/theme-boot.js')) ?: '1' }}"></script>
     <link rel="icon" type="image/svg+xml" href="{{ asset('favicon.svg') }}">
     <title>@hasSection('title')@yield('title') · لقطة@else لقطة · استوديو صور المنتجات@endif</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -114,6 +121,7 @@
                 @auth
                     <form class="lq-sidebar__user" id="lqLogoutForm" method="POST" action="{{ route('logout') }}">
                         @csrf
+                        <x-lq.segmented label="المظهر" :options="$lqThemes" value="system" size="sm" class="lq-theme-switch lq-segmented--ink" data-lq-theme-switch />
                         <span class="lq-sidebar__user-name" dir="ltr">{{ auth()->user()->name }}</span>
                         <button class="lq-btn lq-btn--ghost lq-btn--sm" type="submit">خروج</button>
                     </form>
@@ -129,6 +137,7 @@
                 <span class="lq-account-sheet__name" dir="ltr">{{ auth()->user()->name }}</span>
                 <span class="lq-account-sheet__role">{{ $lqReviewer ? 'مراجع' : 'مدير' }}</span>
                 <button class="lq-btn lq-btn--secondary lq-account-sheet__goto" type="button" data-lq-goto-open>روح لـ… (صفحة، إعداد، أو منتج)</button>
+                <x-lq.segmented label="المظهر" :options="$lqThemes" value="system" size="sm" class="lq-theme-switch" data-lq-theme-switch />
                 <button class="lq-btn lq-btn--secondary lq-account-sheet__logout" type="submit" form="lqLogoutForm">خروج</button>
             </div>
         @endauth

@@ -11,6 +11,25 @@ causes: the quality gate threw away white-background packshots, an unverified "l
 success, siblings of the right product outranked it, and reviewers' rejections were never remembered. The search
 core was rebuilt and wired into the queue, the dashboard actions and the sheet writes. Every claim below has a test.
 
+### UI redesign, phase 4: dark mode
+
+- **The switch.** «فاتح / غامق / تلقائي» sits in the sidebar user row, in the phone «حسابي» sheet and in the UI
+  kit. The default is «تلقائي», which follows the system.
+  - The choice is kept in `localStorage` under `laqta.theme`. It follows other tabs and system changes.
+  - `public/js/theme-boot.js` applies it in `<head>` before the CSS, so there is no white flash. Login and the
+    403 page use it too.
+- **Tokens only.**
+  - The dark set is written twice with identical values: `:root[data-theme="dark"]` and the
+    `prefers-color-scheme` block. Components didn't change.
+  - Body text is about 14:1 in both themes, `text-3` is at least 4.79:1, and every status text is at least
+    4.71:1 on its background (measured in the tests).
+  - The sidebar gets an edge in dark mode, so it doesn't merge with the page.
+- **Review screen.**
+  - Every colour in `review.css` and `cutout.css` comes from a token (34 literals replaced).
+  - Product images are never inverted. Their wells stay white, and the preview stage's «غامق / فاتح / مربعات» uses
+    fixed `--rv-stage-*` colours that don't follow the app theme.
+  - The «⋯» menu items got a visible focus ring.
+
 ### UI redesign, phases 2 and 3: three destinations instead of eight pages
 
 The nav is «اليوم», «المراجعة» and «النظام». Every old address redirects, and «روح لـ…» knows the new places.

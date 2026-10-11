@@ -7,6 +7,9 @@
  * one already on the page. The choice is remembered per viewer in localStorage; every read and write is in try/catch, so
  * a private window or blocked storage simply starts on the default.
  *
+ * This is NOT the app theme (<html data-theme>): the stage colours are the fixed --rv-stage-* tokens in review.css, which
+ * stay the same whether the dashboard is light or dark.
+ *
  * single.js calls R.themePreview.control(stage) where it shows the approved / published image. Loaded by
  * catalog.blade.php before the other review scripts; the node tests load it on its own (module.exports).
  */

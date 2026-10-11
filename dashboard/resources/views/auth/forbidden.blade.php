@@ -5,8 +5,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="color-scheme" content="light">
+    <meta name="color-scheme" content="light dark">
     <meta name="theme-color" content="#0B2226">
+    {{-- the chosen theme (laqta.theme) before the first paint, as in the layout --}}
+    <script src="{{ asset('js/theme-boot.js') }}?v={{ @filemtime(public_path('js/theme-boot.js')) ?: '1' }}"></script>
     <meta name="robots" content="noindex, nofollow">
     <link rel="icon" type="image/svg+xml" href="{{ asset('favicon.svg') }}">
     <title>للمدير بس · لقطة</title>

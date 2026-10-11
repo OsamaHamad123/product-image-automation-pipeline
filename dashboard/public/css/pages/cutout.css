@@ -207,22 +207,22 @@
 
 .cq-stage.rv-theme--dark,
 .cq-thumb.rv-theme--dark {
-    background: #121212;
+    background: var(--rv-stage-dark);
 }
 
 .cq-stage.rv-theme--dark .rv-img-missing {
-    color: #bdbdbd;
+    color: var(--rv-stage-dark-ink);
 }
 
 .cq-stage.rv-theme--light,
 .cq-thumb.rv-theme--light {
-    background: #ffffff;
+    background: var(--rv-stage-light);
 }
 
 .cq-stage.rv-theme--checker,
 .cq-thumb.rv-theme--checker {
-    background-color: #ffffff;
-    background-image: conic-gradient(#d4d4d4 25%, #ffffff 0 50%, #d4d4d4 0 75%, #ffffff 0);
+    background-color: var(--rv-stage-checker-a);
+    background-image: conic-gradient(var(--rv-stage-checker-b) 25%, var(--rv-stage-checker-a) 0 50%, var(--rv-stage-checker-b) 0 75%, var(--rv-stage-checker-a) 0);
     background-size: 16px 16px;
 }
 

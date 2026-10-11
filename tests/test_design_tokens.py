@@ -59,10 +59,11 @@ def px(name: str) -> float:
 
 
 def body_without_root(path: Path) -> str:
-    """The stylesheet without its :root token definitions (laqta.css keeps raw values only there)."""
+    """The stylesheet without its :root token definitions (laqta.css keeps raw values only there: the light set and
+    the two copies of the dark set, :root[data-theme="dark"] and :root:not([data-theme="light"]))"""
     css = strip_comments(read(path))
     if path == LAQTA_CSS:
-        css = re.sub(r":root\s*\{[^}]*\}", "", css)
+        css = re.sub(r":root(?:\[[^\]]*\]|:not\(\[[^\]]*\]\))?\s*\{[^}]*\}", "", css)
     return css
 
 
