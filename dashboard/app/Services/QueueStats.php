@@ -16,12 +16,22 @@ use Illuminate\Support\Facades\Schema;
  */
 class QueueStats
 {
+    /**
+     * automation_queue limited to the current sheet's rows (SheetScope: sheet_key, or every row before the column
+     * exists or while the current sheet is unknown). The badge, the review list and «اليوم» count the same rows.
+     * A run's own rows (run(), runRows()) are read by run_id: one run reads one sheet.
+     */
+    public static function queue()
+    {
+        return SheetScope::apply(DB::table('automation_queue'), 'automation_queue');
+    }
+
     public static function counters(): array
     {
         $byStatus = [];
         $byCode = [];
         try {
-            $rows = DB::table('automation_queue')
+            $rows = self::queue()
                 ->select('status', DB::raw('COUNT(*) AS n'))
                 ->groupBy('status')
                 ->get();
@@ -29,7 +39,7 @@ class QueueStats
                 $byStatus[(string) $r->status] = (int) $r->n;
             }
             if (Schema::hasColumn('automation_queue', 'failure_code')) {
-                $codes = DB::table('automation_queue')
+                $codes = self::queue()
                     ->whereNotNull('failure_code')
                     ->where('failure_code', '<>', '')
                     // archived: a row that left the sheet (local_cache_db.archive_stale_queue_rows): kept, not counted
@@ -671,7 +681,7 @@ class QueueStats
         try {
             // the run that searched last (outcome.searched_at, written by the worker only). Not updated_at: every
             // review decision bumps it, so reviewing an old product made its old run «آخر تشغيل».
-            $row = DB::table('automation_queue')->whereNotNull('run_id')->where('run_id', '<>', '')
+            $row = self::queue()->whereNotNull('run_id')->where('run_id', '<>', '')
                 ->groupBy('run_id')
                 ->select('run_id',
                     DB::raw("MAX(JSON_UNQUOTE(JSON_EXTRACT(trace_json, '$.outcome.searched_at'))) AS last_search"),
@@ -694,11 +704,12 @@ class QueueStats
     public static function retryWaitS(): ?int
     {
         try {
+            $bindings = [];
             $row = DB::selectOne(
                 "SELECT TIMESTAMPDIFF(SECOND, NOW(), MIN(next_attempt_at)) AS wait_s FROM automation_queue "
                 . "WHERE status = 'pending' AND failure_code = 'PROVIDER_DOWN' AND next_attempt_at IS NOT NULL "
                 . "AND next_attempt_at > NOW() AND next_attempt_at <= NOW() + INTERVAL "
-                . self::RETRY_HORIZON_MINUTES . " MINUTE");
+                . self::RETRY_HORIZON_MINUTES . " MINUTE" . SheetScope::sql('automation_queue', $bindings), $bindings);
         } catch (\Throwable $e) {
             return null;
         }
@@ -709,7 +720,7 @@ class QueueStats
     public static function waitingSplit(): ?array
     {
         try {
-            $rows = DB::table('automation_queue')
+            $rows = self::queue()
                 ->where('status', 'ready_for_review')
                 ->select(DB::raw("JSON_UNQUOTE(JSON_EXTRACT(trace_json, '$.outcome.decision')) AS decision"),
                     DB::raw('COUNT(*) AS n'))
@@ -729,7 +740,7 @@ class QueueStats
     public static function queueByRow(): ?array
     {
         try {
-            $rows = DB::table('automation_queue')
+            $rows = self::queue()
                 ->select('row_number', 'status', 'failure_code', 'sku_key',
                     DB::raw("JSON_UNQUOTE(JSON_EXTRACT(trace_json, '$.outcome.decision')) AS decision"),
                     DB::raw('(lease_until IS NOT NULL AND lease_until >= NOW()) AS lease_held'))

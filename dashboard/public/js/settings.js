@@ -97,6 +97,10 @@
         if (res && res.status === 419) return { text: 'انتهت صلاحية الصفحة. حدّثها وجرّب مرة تانية.', detail: '' };
         var data = res && isObject(res.data) ? res.data : {};
         var detail = typeof data.error === 'string' ? data.error : '';
+        /* 409 from POST /api/sheet/save while a run is active (ApiController::SHEET_RUN_ACTIVE) */
+        if (data.error_code === 'run_active' || (res && res.status === 409)) {
+            return { text: detail || 'في تشغيل شغّال هلق. وقّفه أولاً وبعدين غيّر الشيت.', detail: '' };
+        }
         if (data.error_code === 'invalid_sheet') {
             return { text: 'الرابط أو اسم التبويب مش مقبول: حط رابط شيت Google (بيبلّش بـ https://docs.google.com/spreadsheets/d/) '
                 + 'أو اسم الشيت، بدون علامات تنصيص ولا سطر جديد.', detail: detail };

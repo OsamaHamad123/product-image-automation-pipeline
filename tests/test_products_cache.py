@@ -159,6 +159,13 @@ namespace Illuminate\Support\Facades {
     }
 }
 
+namespace App\Http\Controllers {
+    // the configured sheet (ProductController::sheetConfigFingerprint): none set
+    class SettingsController {
+        public static function envValues(array $names) { return []; }
+    }
+}
+
 namespace App\Models {
     class ResolvedProduct {
         public static function query() { return new \FakeQuery([]); }
@@ -210,6 +217,7 @@ namespace {
         public static function get($k, $d = null) { return self::$store[$k] ?? $d; }
         public static function put($k, $v, $ttl = null) { self::$store[$k] = $v; return true; }
         public static function forget($k) { unset(self::$store[$k]); return true; }
+        public static function forever($k, $v) { self::$store[$k] = $v; return true; }
     }
     class FakeResponse {
         public $data; public $status; public $headers = [];
@@ -229,6 +237,7 @@ namespace {
     $GLOBALS['ROOT_DIR'] = getenv('HARNESS_ROOT');
     require getenv('CONTROLLER_BASE');
     require getenv('MATCHER_FILE');
+    require getenv('SHEET_SCOPE_FILE');      // no sheet_key column here (Schema::hasColumn is false): no filter
     require getenv('PRODUCT_CONTROLLER');
 
     use Illuminate\Support\Facades\DB;
@@ -354,7 +363,8 @@ def run_harness(tmp_path, product_controller=PRODUCT):
     script = tmp_path / "harness.php"
     script.write_text(HARNESS, encoding="utf-8")
     env = dict(os.environ, HARNESS_ROOT=str(root), CONTROLLER_BASE=str(CONTROLLERS / "Controller.php"),
-               MATCHER_FILE=str(MATCHER), PRODUCT_CONTROLLER=str(product_controller))
+               MATCHER_FILE=str(MATCHER), PRODUCT_CONTROLLER=str(product_controller),
+               SHEET_SCOPE_FILE=str(DASH / "app" / "Services" / "SheetScope.php"))
     result = subprocess.run([PHP, str(script)], capture_output=True, text=True, timeout=60, env=env)
     assert result.returncode == 0, result.stdout + result.stderr
     return json.loads(result.stdout)

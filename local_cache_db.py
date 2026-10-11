@@ -157,7 +157,121 @@ _SCHEMA_MIGRATIONS = [
     # review_decisions: فئة اختيار المحرك (catalog_match.decide.pick_lane: strict | unsure | other)، دليل فتح
     # النشر الآلي لكل الماركات المؤكدة (AUTO_PUBLISH_STRICT_LANE)
     "ALTER TABLE review_decisions ADD COLUMN IF NOT EXISTS lane VARCHAR(16) NULL",
+    # الورقة التي يخصها الصف (google_sheets.sheet_key = "<معرّف الملف>:<gid التبويب>"): بعد تبديل الشيت أو التبويب صف 19
+    # من الشيت الجديد لا يأخذ مرشحات صف 19 القديم ولا مهمته ولا خطأه. NULL = صف من قبل العمود (backfill_sheet_key)
+    "ALTER TABLE curation_candidates ADD COLUMN IF NOT EXISTS sheet_key VARCHAR(128) NULL",
+    "ALTER TABLE curation_candidates ADD INDEX IF NOT EXISTS idx_curation_sheet (sheet_key)",
+    "ALTER TABLE automation_queue ADD COLUMN IF NOT EXISTS sheet_key VARCHAR(128) NULL",
+    "ALTER TABLE automation_queue ADD INDEX IF NOT EXISTS idx_queue_sheet (sheet_key)",
+    "ALTER TABLE product_failures ADD COLUMN IF NOT EXISTS sheet_key VARCHAR(128) NULL",
+    "ALTER TABLE product_failures ADD INDEX IF NOT EXISTS idx_failure_sheet (sheet_key)",
 ]
+
+
+# ---------------------------------------------------------------------------
+# sheet_key: الورقة التي يخصها كل صف
+# ---------------------------------------------------------------------------
+
+# الجداول التي تحمل sheet_key (sheet_updates يُنشئه google_sheets.SQLiteTransactionQueue)
+SHEET_KEY_TABLES = ("curation_candidates", "automation_queue", "product_failures", "sheet_updates")
+# system_settings: الـ sheet_key الذي خُتمت به الصفوف القديمة (NULL) مرة واحدة بعد الترقية
+LEGACY_SHEET_KEY_SETTING = "legacy_sheet_key"
+_run_sheet_key = None
+_backfill_checked = set()
+_BACKFILL_KEEP_TIMES = {"automation_queue": ", updated_at = updated_at", "curation_candidates": ", created_at = created_at",
+                        "product_failures": ", failed_at = failed_at", "sheet_updates": ", registered_at = registered_at"}
+
+
+def use_sheet_key(key):
+    """
+    sheet_key الورقة التي فتحها هذا التشغيل (main / cli_bridge بعد open_worksheet): كل كاتب هنا بلا sheet_key صريح يختم
+    صفوفه به. None يعيد الرجوع إلى google_sheets.current_sheet_key().
+    """
+    global _run_sheet_key
+    _run_sheet_key = str(key)[:128] if key else None
+
+
+def current_sheet_key(sheet_key=None):
+    """
+    الـ sheet_key الذي يُختم به صف: الممرر، وإلا ورقة هذا التشغيل (use_sheet_key)، وإلا آخر هوية يعرفها google_sheets
+    للشيت المضبوط (بلا طلب لـ Google). None إذا لم تُعرف (سلوك ما قبل العمود).
+    """
+    if sheet_key:
+        return str(sheet_key)[:128]
+    if _run_sheet_key:
+        return _run_sheet_key
+    import sys
+    gs = sys.modules.get("google_sheets")
+    if gs is None:
+        return None
+    try:
+        return gs.current_sheet_key()
+    except Exception:  # noqa: BLE001 - الختم لا يوقف أي كتابة
+        return None
+
+
+def _sheet_scope(sheet_key, alias=""):
+    """شرط «صفوف هذه الورقة (والقديمة بلا sheet_key)» أو ('', ()) بلا ورقة معروفة."""
+    if not sheet_key:
+        return "", ()
+    p = f"{alias}." if alias else ""
+    return f" AND ({p}sheet_key IS NULL OR {p}sheet_key = %s)", (str(sheet_key)[:128],)
+
+
+def backfill_sheet_key(key):
+    """
+    مرة واحدة بعد الترقية: كل صف قديم بلا sheet_key (NULL) في SHEET_KEY_TABLES يأخذ key (أول ورقة يعرفها بايثون بعد
+    الترقية)، ويُحفظ ذلك في system_settings (legacy_sheet_key=<key>) فلا يتكرر أبداً، حتى لو تغيّر الشيت لاحقاً.
+    العلم والتحديثات في معاملة واحدة: فشلٌ في منتصفها لا يترك العلم بلا ختم. تعيد True إذا ختمت الآن، False إذا
+    سبق الختم أو بلا key، None عند خطأ قاعدة البيانات (يُسجل ويُعاد في الاستدعاء التالي).
+    """
+    if not key:
+        return False
+    key = str(key)[:128]
+    if key in _backfill_checked:
+        return False
+    try:
+        conn = get_db_connection()
+    except Exception as e:
+        logger.warning("[MariaDB] تعذر الاتصال لختم الصفوف القديمة بالشيت: %s", e)
+        return None
+    try:
+        cursor = conn.cursor()
+        cursor.execute("SELECT `value` FROM system_settings WHERE `key` = %s", (LEGACY_SHEET_KEY_SETTING,))
+        if cursor.fetchone():
+            _backfill_checked.add(key)
+            return False
+        # الأعمدة قبل المعاملة: ALTER في MariaDB يُنهي أي معاملة مفتوحة (commit ضمني)
+        cursor.execute("SHOW TABLES")
+        present = {str(next(iter(r.values()))) for r in cursor.fetchall() or []}
+        tables = [t for t in SHEET_KEY_TABLES if t in present]
+        for table in tables:
+            cursor.execute(f"ALTER TABLE {table} ADD COLUMN IF NOT EXISTS sheet_key VARCHAR(128) NULL")
+        conn.begin()
+        cursor.execute("INSERT IGNORE INTO system_settings (`key`, `value`) VALUES (%s, %s)",
+                       (LEGACY_SHEET_KEY_SETTING, key))
+        if cursor.rowcount != 1:
+            conn.rollback()                      # عملية أخرى ختمت للتو
+            _backfill_checked.add(key)
+            return False
+        stamped = {}
+        for table in tables:
+            # الختم لا يغيّر أوقات الصفوف (updated_at يتحدث وحده مع أي UPDATE؛ اللوحة تحكم به على حداثة الصف)
+            keep = _BACKFILL_KEEP_TIMES.get(table, "")
+            stamped[table] = cursor.execute(f"UPDATE {table} SET sheet_key = %s{keep} WHERE sheet_key IS NULL", (key,))
+        conn.commit()
+        _backfill_checked.add(key)
+        logger.info("[MariaDB] خُتمت الصفوف القديمة بالشيت %s: %s", key, stamped)
+        return True
+    except Exception as e:
+        try:
+            conn.rollback()
+        except Exception:
+            pass
+        logger.warning("[MariaDB] تعذر ختم الصفوف القديمة بالشيت %s (يُعاد لاحقاً): %s", key, e)
+        return None
+    finally:
+        _close(conn)
 
 
 # «النشر الآلي لكل الماركات المؤكدة» صار شغّال افتراضياً (موافقة المالك). قبل هيك كانت البذرة تكتب 'false'، ومفتاح
@@ -1272,12 +1386,13 @@ def _rekey_junk_failures(cursor):
             cursor.execute("UPDATE product_failures SET barcode = %s WHERE barcode = %s", (new, old))
 
 
-def save_product_failure(barcode, product_name, brand, error_message, sku_key=None):
+def save_product_failure(barcode, product_name, brand, error_message, sku_key=None, sheet_key=None):
     """
     تسجيل فشل منتج حقيقي (لا تُسجل هنا انقطاعات المزودين). سجل واحد لكل منتج: بـ sku_key عند تمريره
     (عمود فريد)، ومفتاح العرض failure_key. منتج آخر يحمل مفتاح العرض نفسه (نفس الاسم والبراند وحجم آخر)
-    لا يُكتب فوقه: يُضاف sku_key إلى المفتاح.
+    لا يُكتب فوقه: يُضاف sku_key إلى المفتاح. sheet_key: الورقة التي فشل فيها المنتج (current_sheet_key).
     """
+    sheet = current_sheet_key(sheet_key)
     sku_clean = str(sku_key).strip()[:64] if sku_key else ""
     key = failure_key(barcode, product_name, brand or "")
     try:
@@ -1291,9 +1406,10 @@ def save_product_failure(barcode, product_name, brand, error_message, sku_key=No
                 if holder and holder.get("sku_key") and holder["sku_key"] != sku_clean:
                     key = f"{key[:190]}#{sku_clean}"
             cursor.execute("""
-                REPLACE INTO product_failures (barcode, product_name, brand, error_message, failed_at, sku_key)
-                VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP, %s)
-            """, (key, product_name, brand, error_message, sku_clean or None))
+                REPLACE INTO product_failures (barcode, product_name, brand, error_message, failed_at, sku_key,
+                                              sheet_key)
+                VALUES (%s, %s, %s, %s, CURRENT_TIMESTAMP, %s, %s)
+            """, (key, product_name, brand, error_message, sku_clean or None, sheet))
             conn.commit()
         finally:
             _close(conn)
@@ -1922,9 +2038,12 @@ TRANSIENT_DB_ERRORS = (pymysql.err.OperationalError, pymysql.err.InterfaceError,
 
 _QUEUE_COLUMNS = ("`row_number`", "barcode", "product_name", "brand", "search_query", "status", "attempts",
                   "sku_key", "alt_sku_key", "payload_json", "brand_fp", "priority", "task_kind", "review_only",
-                  "requeue_reason", "fail_count", "reverify_count")
+                  "requeue_reason", "fail_count", "reverify_count", "sheet_key")
+# الورقة جزء من الهوية: الصف بعد الإدراج يخص الورقة التي قُرئ منها (row_number فريد: صف 19 للشيت الجديد يأخذ مكان
+# صف 19 القديم، وplan_queue_row يبدأه من الصفر)
 _IDENTITY_UPDATE = ("barcode = VALUES(barcode), product_name = VALUES(product_name), brand = VALUES(brand), "
                     "search_query = VALUES(search_query), sku_key = VALUES(sku_key), "
+                    "sheet_key = COALESCE(VALUES(sheet_key), sheet_key), "
                     "alt_sku_key = VALUES(alt_sku_key), payload_json = VALUES(payload_json), "
                     "updated_at = CURRENT_TIMESTAMP")
 # الصيغة (VALUES من %s فقط، ولا %s بعد ON DUPLICATE) تجعل pymysql يرسل الدفعة كلها في عبارة INSERT واحدة
@@ -1963,6 +2082,8 @@ def plan_queue_row(old, new, reprocess=False):
              "review_only": 1 if new.get("review_only") else 0, "requeue_reason": new.get("requeue_reason") or None}
     if old is None:
         return "insert", fresh
+    if old.get("sheet_key") and new.get("sheet_key") and old["sheet_key"] != new["sheet_key"]:
+        return "reset", fresh               # صف شيت أو تبويب آخر بنفس الرقم: منتج آخر، من الصفر
     same = old.get("sku_key") == new.get("sku_key") or (
         old.get("sku_key") is None and _same_text(old.get("product_name"), new.get("product_name")))
     if reprocess or not same:
@@ -2003,14 +2124,14 @@ def _queue_row_params(new, fields):
     return (new["row_number"], new.get("barcode"), new.get("product_name"), new.get("brand"), new.get("search_query"),
             "pending", 0, new.get("sku_key"), new.get("alt_sku_key"), new.get("payload_json"), new.get("brand_fp"),
             fields["priority"], fields["task_kind"], fields["review_only"], fields["requeue_reason"],
-            fields["fail_count"], fields["reverify_count"])
+            fields["fail_count"], fields["reverify_count"], current_sheet_key(new.get("sheet_key")))
 
 
 def _upsert_queue_chunk(cursor, chunk, reprocess):
     numbers = [r["row_number"] for r in chunk]
     cursor.execute(
         "SELECT id, `row_number`, sku_key, product_name, status, failure_code, fail_count, reverify_count, priority, "
-        "task_kind, review_only, requeue_reason, brand_fp, "
+        "task_kind, review_only, requeue_reason, brand_fp, sheet_key, "
         "(lease_until IS NOT NULL AND lease_until >= NOW()) AS live, (next_attempt_at IS NOT NULL) AS has_next, "
         "(next_attempt_at IS NOT NULL AND next_attempt_at <= NOW()) AS due "
         f"FROM automation_queue WHERE `row_number` IN ({','.join(['%s'] * len(numbers))}) FOR UPDATE",
@@ -2021,6 +2142,7 @@ def _upsert_queue_chunk(cursor, chunk, reprocess):
     counts = {"insert": 0, "keep": 0, "reset": 0}
     for new in chunk:
         old = existing.get(new["row_number"])
+        new = dict(new, sheet_key=current_sheet_key(new.get("sheet_key")))
         action, fields = plan_queue_row(old, new, reprocess)
         counts[action] += 1
         if action == "keep":
@@ -2040,12 +2162,12 @@ def _upsert_queue_chunk(cursor, chunk, reprocess):
 
 
 def queue_input(row_number, barcode, name, brand, query, payload=None, sku_key=None, alt_sku_key=None,
-                 brand_fp=None, task_kind=None, review_only=False, requeue_reason=None):
+                 brand_fp=None, task_kind=None, review_only=False, requeue_reason=None, sheet_key=None):
     return {"row_number": row_number, "barcode": barcode, "product_name": name, "brand": brand,
             "search_query": query, "sku_key": sku_key, "alt_sku_key": alt_sku_key or sku_key,
             "payload_json": json.dumps(payload, ensure_ascii=False) if payload is not None else None,
             "brand_fp": brand_fp, "task_kind": task_kind, "review_only": 1 if review_only else 0,
-            "requeue_reason": requeue_reason}
+            "requeue_reason": requeue_reason, "sheet_key": sheet_key}
 
 
 def add_many_to_queue(rows, reprocess=False, totals=None):
@@ -2161,9 +2283,10 @@ def relocate_queue_rows(moves):
                                f"WHERE id IN ({','.join(['%s'] * len(ids))})", tuple(ids))
                 cursor.executemany("UPDATE automation_queue SET `row_number` = %s, updated_at = updated_at "
                                    "WHERE id = %s", [(new, rows_at[old]["id"]) for old, new, _ in valid])
+                scope_sql, scope_params = _sheet_scope(current_sheet_key())
                 cursor.executemany("UPDATE curation_candidates SET `row_number` = %s "
-                                   "WHERE sku_key = %s AND `row_number` = %s",
-                                   [(new, key, old) for old, new, key in valid])
+                                   f"WHERE sku_key = %s AND `row_number` = %s{scope_sql}",
+                                   [(new, key, old) + scope_params for old, new, key in valid])
                 conn.commit()
                 return len(valid)
             except pymysql.err.OperationalError as e:
@@ -2283,15 +2406,17 @@ def new_claim_id(worker_id=None):
     return f"{base}#{uuid.uuid4().hex[:12]}"[:64]
 
 
-def fetch_next_task(worker_id=None):
+def fetch_next_task(worker_id=None, sheet_key=None):
     """
     سحب ذري للمهمة التالية: UPDATE واحد يحجز الصف (pending، أو processing انتهى حجزه) بمعرف سحب فريد،
     ثم SELECT بذلك المعرف. شرط الحالة يتكرر في الـ WHERE الخارجي كي يفشل المتسابق الثاني بدل أن يسرق الصف.
     الترتيب: الأولوية (جديد، ثم إعادة تحقق، ثم إعادة محاولة) ثم id. صف أعاده انقطاع المزودين لا يُسحب قبل موعده،
     وصف لمنتج (sku_key) قيد المعالجة في صف آخر ينتظر (بحث واحد لكل منتج).
+    sheet_key: صفوف هذه الورقة فقط (والقديمة بلا sheet_key): مهمة شيت آخر لا تُبحث ولا تُكتب في هذه الورقة.
     أخطاء قاعدة البيانات تُرفع (لا تتحول إلى None).
     """
     claim_id = new_claim_id(worker_id)
+    scope_sql, scope_params = _sheet_scope(sheet_key, "q")
     # حجز بلا lease_until (صفوف تركها الإصدار القديم في 'processing' عند إيقافه) يُعامل كمنتهٍ،
     # وإلا لن يُسحب أبداً ويبقى count_open_tasks أكبر من صفر فلا ينتهي العامل.
     conn = get_db_connection()
@@ -2303,9 +2428,9 @@ def fetch_next_task(worker_id=None):
             "UPDATE automation_queue SET status='processing', worker_id=%s, "
             f"lease_until=NOW() + INTERVAL {LEASE_MINUTES} MINUTE, attempts=attempts+1, updated_at=CURRENT_TIMESTAMP "
             f"WHERE id=(SELECT id FROM (SELECT q.id FROM automation_queue q WHERE {_claimable('q')} "
-            f"AND (NOT ({_SIBLING_BUSY_SQL}){free_sql}) ORDER BY q.priority, q.id LIMIT 1) t) "
+            f"AND (NOT ({_SIBLING_BUSY_SQL}){free_sql}){scope_sql} ORDER BY q.priority, q.id LIMIT 1) t) "
             f"AND {_claimable()}",
-            (claim_id,) + tuple(free),
+            (claim_id,) + tuple(free) + scope_params,
         )
         conn.commit()
         cursor.execute("SELECT * FROM automation_queue WHERE worker_id = %s LIMIT 1", (claim_id,))
@@ -2809,19 +2934,21 @@ def get_queue_statistics():
     return stats
 
 
-def count_open_tasks():
+def count_open_tasks(sheet_key=None):
     """
     عدد المهام المفتوحة (pending أو processing) التي يستطيع هذا التشغيل معالجتها، بـ COUNT(*) موثوق. صف أعاده
     انقطاع المزودين بموعد أبعد من OPEN_TASK_HORIZON_MINUTES لا يُحسب: يبقى في الانتظار للتشغيل التالي ولا يُبقي
-    العامل حياً بلا عمل. أخطاء قاعدة البيانات تُرفع.
+    العامل حياً بلا عمل. sheet_key: مهام هذه الورقة فقط (كما يسحبها fetch_next_task). أخطاء قاعدة البيانات تُرفع.
     """
+    scope_sql, scope_params = _sheet_scope(sheet_key)
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
         cursor.execute(
             "SELECT COUNT(*) AS cnt FROM automation_queue WHERE status IN ('pending','processing') "
             "AND NOT (status = 'pending' AND failure_code <=> 'PROVIDER_DOWN' "
-            f"AND {_backoff_until('', f'NOW() + INTERVAL {OPEN_TASK_HORIZON_MINUTES} MINUTE')})")
+            f"AND {_backoff_until('', f'NOW() + INTERVAL {OPEN_TASK_HORIZON_MINUTES} MINUTE')}){scope_sql}",
+            scope_params or None)
         row = cursor.fetchone()
     finally:
         _close(conn)
@@ -3018,7 +3145,7 @@ def queue_snapshot():
     conn = get_db_connection()
     try:
         cursor = conn.cursor()
-        cursor.execute("SELECT `row_number`, sku_key, status, failure_code, fail_count, searched_at "
+        cursor.execute("SELECT `row_number`, sku_key, status, failure_code, fail_count, searched_at, sheet_key "
                        "FROM automation_queue")
         rows = cursor.fetchall() or []
     finally:
@@ -3174,7 +3301,7 @@ def _as_int(value):
 
 
 def save_curation_candidates(row_number, product_name, brand, candidates, best_url=None, sku_key=None, run_id=None,
-                             identity=None):
+                             identity=None, sheet_key=None):
     """
     استبدال مرشحات المنتج بمرشحات التشغيل الحالي في معاملة واحدة.
     تُحفظ الحالة والأسباب والأدلة وقراءة VLM لكل مرشح. is_selected=1 فقط للحالة 'preselected'
@@ -3182,9 +3309,11 @@ def save_curation_candidates(row_number, product_name, brand, candidates, best_u
     الحذف بنفس قاعدة القراءة (_row_or_sku_clause): مرشحات هذا الـ sku_key، ورقم الصف فقط للصفوف القديمة بلا
     sku_key؛ فمنتج انتقل إلى رقم صف منتج آخر بعد تعديل الشيت لا يمسح مرشحات ذلك المنتج. مرشحات منتج آخر يشارك
     هذا المنتج الـ sku_key (نفس خلية الباركود) لا تُمسح (_foreign_candidate_ids). identity: هوية المنتج
-    (queue_row_identity)؛ الافتراضي الاسم والبراند.
+    (queue_row_identity)؛ الافتراضي الاسم والبراند. sheet_key: الورقة التي يخصها المنتج (current_sheet_key): المرشحات
+    تُختم بها، والحذف لا يمس مرشحات ورقة أخرى.
     """
     run_id = run_id or uuid.uuid4().hex[:16]
+    sheet = current_sheet_key(sheet_key)
     if identity is None:
         identity = {"name": product_name, "brand": brand}
     try:
@@ -3196,7 +3325,8 @@ def save_curation_candidates(row_number, product_name, brand, candidates, best_u
         cursor = conn.cursor()
         clause, params = _without_ids(*_row_or_sku_clause(row_number, sku_key),
                                       _foreign_candidate_ids(cursor, sku_key, identity))
-        cursor.execute(f"DELETE FROM curation_candidates WHERE {clause}", params)
+        scope_sql, scope_params = _sheet_scope(sheet)
+        cursor.execute(f"DELETE FROM curation_candidates WHERE {clause}{scope_sql}", tuple(params) + scope_params)
         seen = set()
         for c in candidates or []:
             url = (c.get("url") or c.get("image_url") or "").strip()
@@ -3221,8 +3351,8 @@ def save_curation_candidates(row_number, product_name, brand, candidates, best_u
                 INSERT INTO curation_candidates (
                     `row_number`, product_name, brand, image_url, title, width, height, clip_score, source_domain,
                     is_selected, status, sku_key, run_id, reasons_json, evidence_json, vlm_json, content_sha256,
-                    identity_tier, page_url, provider, query_id, phash
-                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    identity_tier, page_url, provider, query_id, phash, sheet_key
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """, (
                 row_number, product_name, brand, url, title, _as_int(c.get("width")), _as_int(c.get("height")),
                 _candidate_score(c), str(domain)[:255], 1 if status == "preselected" else 0, status[:255],
@@ -3230,7 +3360,7 @@ def save_curation_candidates(row_number, product_name, brand, candidates, best_u
                 _json_or_none(c.get("vlm")), c.get("content_sha256") or None,
                 (str(tier)[:8] if tier is not None else None), page_url,
                 _short_text(c.get("provider") or c.get("source"), 32), _short_text(c.get("query_id"), 16),
-                _short_text(c.get("phash"), 32),
+                _short_text(c.get("phash"), 32), sheet,
             ))
         conn.commit()
         return True
@@ -3254,12 +3384,15 @@ def _loads(value, default):
         return default
 
 
-def get_curation_candidates(row_number, sku_key=None, identity=None):
+def get_curation_candidates(row_number, sku_key=None, identity=None, sheet_key=None):
     """
     جلب المرشحات المحفوظة لمنتج (المختار مسبقاً أولاً): بـ sku_key عند تمريره، وإلا برقم الصف.
-    identity (هوية المنتج): تُستبعد مرشحات منتج آخر يشاركه الـ sku_key.
+    identity (هوية المنتج): تُستبعد مرشحات منتج آخر يشاركه الـ sku_key. sheet_key (افتراضياً current_sheet_key): مرشحات
+    هذه الورقة فقط (والقديمة بلا sheet_key)، فصف بنفس الرقم في شيت آخر لا يعطي مرشحاته.
     """
     clause, params = _row_or_sku_clause(row_number, sku_key)
+    scope_sql, scope_params = _sheet_scope(current_sheet_key(sheet_key))
+    clause, params = f"{clause}{scope_sql}", tuple(params) + scope_params
     try:
         conn = get_db_connection()
         try:

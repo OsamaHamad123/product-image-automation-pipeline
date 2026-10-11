@@ -67,8 +67,9 @@ def _parse_payload(raw):
         expect = payload.get("expect") if isinstance(payload.get("expect"), dict) else None
         if payload.get("v") == google_sheets.REDIS_PAYLOAD_VERSION:
             seqs = payload.get("seqs") if isinstance(payload.get("seqs"), dict) else {}
+            sheet_key = payload.get("sheet_key") if isinstance(payload.get("sheet_key"), str) else None
             return {"row_index": row_index, "updates": {str(k): v for k, v in updates.items()},
-                    "seqs": seqs, "expect": expect, "legacy": False}
+                    "seqs": seqs, "expect": expect, "sheet_key": sheet_key or None, "legacy": False}
         if "v" not in payload and updates and all(str(k).lstrip("-").isdigit() for k in updates):
             return {"row_index": row_index, "updates": updates, "seqs": {}, "expect": expect, "legacy": True}
         return None
@@ -124,11 +125,15 @@ def _park_legacy(r, key, raw, parsed):
 
 
 def _forward(queue, parsed):
-    """كل خلية في الحمولة تصبح صفاً في طابور MariaDB بمفتاحها المنطقي وتسلسلها وهوية المنتج."""
+    """
+    كل خلية في الحمولة تصبح صفاً في طابور MariaDB بمفتاحها المنطقي وتسلسلها وهوية المنتج والورقة التي تخصها
+    (sheet_key): المُفرِّغ لا يكتبها إلا في تلك الورقة. حمولة قديمة بلا sheet_key تُختم بالشيت المضبوط الآن.
+    """
     keys = google_sheets._outbox_keys(parsed.get("expect"))
+    extra = {"sheet_key": parsed["sheet_key"]} if parsed.get("sheet_key") else {}
     for col_key, value in parsed["updates"].items():
         queue.append_update(parsed["row_index"], -1, value, col_key=col_key, seq=parsed["seqs"].get(col_key),
-                            **keys)
+                            **keys, **extra)
 
 
 def run_sync_cycle(worksheet, r=None, queue=None, flush=True, heartbeat=True):

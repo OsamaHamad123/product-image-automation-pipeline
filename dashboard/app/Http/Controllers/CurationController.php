@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use App\Services\CandidateRow;
 use App\Services\PythonBridge;
+use App\Services\SheetScope;
 
 class CurationController extends Controller
 {
@@ -96,8 +97,10 @@ class CurationController extends Controller
                     }
                 };
 
-                DB::table('curation_candidates')->where($scope)->update(['is_selected' => 0]);
-                DB::table('curation_candidates')->where($scope)
+                // the current sheet's candidates only (SheetScope): the same row number in another sheet is another product
+                SheetScope::apply(DB::table('curation_candidates'), 'curation_candidates')->where($scope)
+                    ->update(['is_selected' => 0]);
+                SheetScope::apply(DB::table('curation_candidates'), 'curation_candidates')->where($scope)
                     ->where('image_url', $selectedUrl)
                     ->update(['is_selected' => 1]);
             }
@@ -139,6 +142,8 @@ class CurationController extends Controller
                 $columns = array_flip(Schema::getColumnListing('curation_candidates'));
                 $hasSku = isset($columns['sku_key']);
                 $runId = 'ui-' . date('YmdHis') . '-' . bin2hex(random_bytes(4));
+                // the sheet these candidates belong to (null: unknown or no column yet, the column stays NULL)
+                $sheetKey = SheetScope::key('curation_candidates');
 
                 $rowsToInsert = [];
                 foreach ($candidates as $c) {
@@ -167,7 +172,7 @@ class CurationController extends Controller
                         continue;
                     }
                     // page_url والطبقة (evidence.tier) تُحفظ كما يحفظها كاتب بايثون
-                    $optional = CandidateRow::optionalColumns($c, $skuKey, $runId);
+                    $optional = CandidateRow::optionalColumns($c, $skuKey, $runId, $sheetKey);
                     foreach ($optional as $col => $value) {
                         if (isset($columns[$col])) {
                             $row[$col] = $value;
@@ -176,10 +181,15 @@ class CurationController extends Controller
                     $rowsToInsert[] = $row;
                 }
 
-                DB::transaction(function () use ($rowNumber, $skuKey, $hasSku, $rowsToInsert) {
+                DB::transaction(function () use ($rowNumber, $skuKey, $hasSku, $rowsToInsert, $sheetKey) {
                     // نفس قاعدة بايثون (local_cache_db._row_or_sku_clause): مرشحات هذا الـ sku_key، ورقم الصف فقط
-                    // للصفوف القديمة بلا sku_key؛ فصف تغيّر رقمه بعد تعديل الشيت لا يمسح مرشحات منتج آخر
-                    DB::table('curation_candidates')->where(function ($q) use ($rowNumber, $skuKey, $hasSku) {
+                    // للصفوف القديمة بلا sku_key؛ فصف تغيّر رقمه بعد تعديل الشيت لا يمسح مرشحات منتج آخر.
+                    // ومرشحات الشيت الحالي بس (sheet_key): نفس الصف بشيت تاني بيضل إله
+                    $query = DB::table('curation_candidates');
+                    if ($sheetKey !== null) {
+                        $query->where('sheet_key', $sheetKey);
+                    }
+                    $query->where(function ($q) use ($rowNumber, $skuKey, $hasSku) {
                         if ($hasSku && $skuKey !== '') {
                             $q->where('sku_key', $skuKey)->orWhere(function ($legacy) use ($rowNumber) {
                                 $legacy->whereNull('sku_key')->where('row_number', $rowNumber);

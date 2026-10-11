@@ -309,6 +309,18 @@
     white-space: nowrap;
 }
 
+/* «الشيت: X · الورقة: Y» under the review titles (app.js R.sheetLine, review/shell.blade.php) */
+.rv-sheetline {
+    margin: 0;
+    font-size: var(--lq-fs-xs);
+    line-height: var(--lq-lh-base);
+    overflow-wrap: anywhere;
+}
+
+.rv-queue__head .rv-sheetline {
+    margin-block-start: calc(-1 * var(--lq-space-2));
+}
+
 .rv-refresh {
     align-self: center;
     color: var(--lq-text-3);
@@ -1814,6 +1826,11 @@
     align-items: center;
     justify-content: space-between;
     gap: var(--lq-space-4);
+}
+
+/* the titles row and «الشيت: X · الورقة: Y» under it */
+.rv-bulk__titlebox {
+    min-width: 0;
 }
 
 .rv-bulk__titles {

@@ -638,7 +638,8 @@ def test_an_approval_of_a_product_without_a_barcode_is_found_by_its_key(tmp_path
     script.write_text(harness, encoding="utf-8")
     import os
     env = dict(os.environ, HARNESS_ROOT=str(root), CONTROLLER_BASE=str(pc.CONTROLLERS / "Controller.php"),
-               MATCHER_FILE=str(pc.MATCHER), PRODUCT_CONTROLLER=str(pc.PRODUCT))
+               MATCHER_FILE=str(pc.MATCHER), PRODUCT_CONTROLLER=str(pc.PRODUCT),
+               SHEET_SCOPE_FILE=str(pc.DASH / "app" / "Services" / "SheetScope.php"))
     res = subprocess.run([_shutil.which("php"), str(script)], capture_output=True, text=True, timeout=60, env=env)
     assert res.returncode == 0, res.stdout + res.stderr
     assert json.loads(res.stdout) == [[2, "https://res.cloudinary.com/x/milk.png"], [3, None]]
@@ -696,7 +697,8 @@ def test_an_approval_is_found_by_the_products_key_before_its_barcode(tmp_path):
     script.write_text(harness, encoding="utf-8")
     import os
     env = dict(os.environ, HARNESS_ROOT=str(root), CONTROLLER_BASE=str(pc.CONTROLLERS / "Controller.php"),
-               MATCHER_FILE=str(pc.MATCHER), PRODUCT_CONTROLLER=str(pc.PRODUCT))
+               MATCHER_FILE=str(pc.MATCHER), PRODUCT_CONTROLLER=str(pc.PRODUCT),
+               SHEET_SCOPE_FILE=str(pc.DASH / "app" / "Services" / "SheetScope.php"))
     res = subprocess.run([_shutil.which("php"), str(script)], capture_output=True, text=True, timeout=60, env=env)
     assert res.returncode == 0, res.stdout + res.stderr
     assert json.loads(res.stdout) == [[2, "https://res.cloudinary.com/x/milk.png", "human_approved"],

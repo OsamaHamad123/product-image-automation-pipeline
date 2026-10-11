@@ -43,7 +43,9 @@ def flush():
 def main():
     """مرة واحدة: فرّغ إن كان في كتابة مستحقة. رمز الخروج 0 حتى مع انقطاع Google أو قاعدة البيانات."""
     try:
-        due = google_sheets.outbox_due_count()
+        # كتابات الشيت المضبوط الآن فقط: كتابات معلقة لشيت قديم (قبل تبديله) لا تفتح الشيت الجديد كل دقيقتين
+        key = google_sheets.current_sheet_key()
+        due = google_sheets.outbox_due_count(sheet_key=key) if key else google_sheets.outbox_due_count()
     except Exception as e:  # noqa: BLE001 - قاعدة البيانات لا ترد: صفحة الصحة تقول ذلك، ولا داعي لفشل الوحدة كل دقيقتين
         print(f"⏳ قاعدة البيانات لا ترد ({type(e).__name__}): أعد المحاولة بعد قليل.")
         return 0

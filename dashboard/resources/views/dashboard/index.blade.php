@@ -5,6 +5,7 @@
       $todayAdmin   false for a reviewer: no run panel and no sheet tools are rendered (ReviewerLimits blocks their writes)
       $autoPublish  RunController::autoPublishState() (admin only): the worker's auto-publish setting in one sentence
       $sheetTab     RunController::sheetTab() (admin only): «التشغيل بيقرأ من تبويب «X»»
+      $sheetLine    RunController::sheetLine(): «الشيت: X · الورقة: Y» (a link for the owner, plain text for a reviewer)
     Order: header · «جهّز لقطة» (setup unfinished) · next step + one alert banner · KPIs · «التشغيل» · funnel · «أدوات الشيت».
 
     One poll of GET /api/run/live per page:
@@ -84,6 +85,8 @@
     {{-- «التشغيل»: تشغيل جديد + التشغيل الحالي جنب بعض (عالموبايل فوق بعض، والحالي أول وهو شغّال: run.css) --}}
     <section class="lq-today-run" aria-labelledby="lq-today-run-title">
         <h2 class="lq-section-title" id="lq-today-run-title">التشغيل</h2>
+        {{-- the sheet and tab the run reads (RunController::sheetLine), a link to «ربط الشيت» --}}
+        <x-lq.sheet-line :line="$sheetLine ?? null" class="lq-today-run__sheet" />
         <div class="lq-run__grid">
             {{-- New run --}}
             <section class="lq-card lq-run-new" id="run-new" aria-labelledby="lq-run-new-title">
@@ -227,6 +230,9 @@
             </section>
         </div>
     </section>
+    @else
+    {{-- a reviewer has no run panel: the same line, plain text, where it would be --}}
+    <x-lq.sheet-line :line="$sheetLine ?? null" />
     @endif
 
     <section class="lq-card lq-card--flat" aria-labelledby="lq-home-funnel-title" data-home="funnel" data-state="loading" aria-busy="true">

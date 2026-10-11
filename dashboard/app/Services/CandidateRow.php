@@ -12,7 +12,11 @@ namespace App\Services;
  */
 final class CandidateRow
 {
-    public static function optionalColumns(array $c, string $skuKey, string $runId): array
+    /**
+     * $sheetKey: the sheet the candidate belongs to ("<spreadsheet_id>:<worksheet_gid>", SheetScope::key), or null
+     * (unknown, or no sheet_key column yet): the column stays NULL.
+     */
+    public static function optionalColumns(array $c, string $skuKey, string $runId, ?string $sheetKey = null): array
     {
         $evidence = (isset($c['evidence']) && is_array($c['evidence'])) ? $c['evidence'] : [];
         $tier = $c['identity_tier'] ?? ($evidence['tier'] ?? null);
@@ -34,6 +38,7 @@ final class CandidateRow
             'provider' => $short($c['provider'] ?? null, 32),
             'query_id' => $short($c['query_id'] ?? null, 16),
             'phash' => $short($c['phash'] ?? null, 32),
+            'sheet_key' => $sheetKey !== null && trim($sheetKey) !== '' ? mb_substr(trim($sheetKey), 0, 128) : null,
         ];
     }
 }

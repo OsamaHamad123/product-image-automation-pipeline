@@ -8,6 +8,7 @@ use Illuminate\Support\Facades\Schema;
 use App\Models\ResolvedProduct;
 use App\Services\PythonBridge;
 use App\Services\CandidateMatcher;
+use App\Services\SheetScope;
 
 class ProductController extends Controller
 {
@@ -33,6 +34,9 @@ class ProductController extends Controller
      * جواب 304 لصفحة المراجعة ما بيفك كاش المنتجات كله (~250 KB) ولا بيعيد الدمج.
      */
     public const REVIEW_PRODUCTS_TAG_KEY = 'review_products_tag_v1';
+
+    /** مفتاح الشيت الحالي (currentSheetKey) بلا مدة: بيضل بعد ما يفضى كاش الصفوف، وبيبطل لحاله لما يتغيّر الربط. */
+    public const SHEET_KEY_CACHE_KEY = 'sheet_key_v1';
 
     private const PRODUCTS_CACHE_SECONDS = 3600;
 
@@ -72,18 +76,60 @@ class ProductController extends Controller
     }
 
     /**
-     * بصمة ملف كاش الشيت لدى بايثون (products_cache.json). بايثون يحذف الملف بعد كل كتابة في الشيت
-     * (العامل، عامل المزامنة، الاعتماد، حفظ إعدادات الشيت) ويعيد إنشاءه عند القراءة التالية، فتغيّر البصمة
-     * يعني أن الصفوف المخزنة هنا قديمة حتى لو لم تمر الكتابة عبر لارافيل. null: لا يوجد كاش صالح لدى بايثون.
+     * بصمة ملف كاش الشيت لدى بايثون (products_cache.json) مع بصمة الشيت المضبوط (sheetConfigFingerprint). بايثون يحذف
+     * الملف بعد كل كتابة في الشيت (العامل، عامل المزامنة، الاعتماد، حفظ إعدادات الشيت) ويعيد إنشاءه عند القراءة التالية،
+     * فتغيّر البصمة يعني أن الصفوف المخزنة هنا قديمة حتى لو لم تمر الكتابة عبر لارافيل. والملف ما بيقول من أي شيت انقرا:
+     * تعديل SPREADSHEET_NAME_OR_URL أو SPREADSHEET_TAB_NAME بـ .env مباشرة (بلا «حفظ الربط») بيغيّر البصمة كمان.
+     * null: لا يوجد كاش صالح لدى بايثون.
      */
-    private static function sheetStamp(): ?string
+    public static function sheetStamp(): ?string
     {
         $path = base_path('../products_cache.json');
         clearstatcache(true, $path);
         if (!is_file($path)) {
             return null;
         }
-        return filemtime($path) . ':' . filesize($path);
+        return filemtime($path) . ':' . filesize($path) . ':' . self::sheetConfigFingerprint();
+    }
+
+    /**
+     * بصمة قصيرة للشيت المضبوط: SPREADSHEET_NAME_OR_URL وSPREADSHEET_TAB_NAME كما يقرأهم بايثون (بيئة العملية ثم .env
+     * الجذر، SettingsController::envValues). قراءة ملف صغير بس، بلا بايثون وبلا Google.
+     */
+    public static function sheetConfigFingerprint(): string
+    {
+        $env = SettingsController::envValues(['SPREADSHEET_NAME_OR_URL', 'SPREADSHEET_TAB_NAME']);
+        return substr(sha1(trim((string) ($env['SPREADSHEET_NAME_OR_URL'] ?? '')) . "\n"
+            . trim((string) ($env['SPREADSHEET_TAB_NAME'] ?? ''))), 0, 12);
+    }
+
+    /**
+     * مفتاح الشيت الحالي ("<spreadsheet_id>:<worksheet_gid>") كما رجّعه آخر get_products، أو null إذا ما انعرف بعد
+     * (ما في قراءة للشيت من وقت ما تغيّر الربط، أو جسر قديم بلا sheet_key). ما بيستدعي بايثون أبداً: كاش صفوف الشيت،
+     * وإلا نسخة بلا مدة (SHEET_KEY_CACHE_KEY: كل اعتماد بيفضّي كاش الصفوف، والمفتاح ما بيتغيّر معه). الاثنين صالحين بس
+     * لنفس الشيت المضبوط (sheetConfigFingerprint).
+     */
+    public static function currentSheetKey(): ?string
+    {
+        try {
+            $config = self::sheetConfigFingerprint();
+            foreach ([self::SHEET_ROWS_CACHE_KEY, self::SHEET_KEY_CACHE_KEY] as $cacheKey) {
+                $cached = \Cache::get($cacheKey);
+                $key = is_array($cached) && is_string($cached['sheet_key'] ?? null) ? trim($cached['sheet_key']) : '';
+                if ($key !== '' && ($cached['config'] ?? null) === $config) {
+                    return $key;
+                }
+            }
+        } catch (\Throwable $e) {
+            // cache store unavailable: unknown
+        }
+        return null;
+    }
+
+    /** بعد حفظ ربط شيت جديد: المفتاح المحفوظ صار لشيت تاني (الصفوف نفسها بتفضى بـ forgetProductCaches). */
+    public static function forgetSheetKey(): void
+    {
+        \Cache::forget(self::SHEET_KEY_CACHE_KEY);
     }
 
     /**
@@ -100,14 +146,23 @@ class ProductController extends Controller
             }
         }
 
+        // الشيت المضبوط قبل القراءة: حفظ ربط جديد أثناءها بيخلّي الطلب الجاي يقرأ من جديد
+        $config = self::sheetConfigFingerprint();
         $result = PythonBridge::run('get_products');
         if (($result['status'] ?? '') !== 'success' || !is_array($result['products'] ?? null)) {
             $error = (string) ($result['error'] ?? 'Unknown error');
             return null;
         }
-        // tab: اسم التبويب اللي انقرت منه الصفوف (cli_bridge get_products sheet_tab)، لسطر صفحة التشغيل بلا طلب جديد
+        // tab: اسم التبويب اللي انقرت منه الصفوف (cli_bridge get_products sheet_tab)، لسطر صفحة التشغيل بلا طلب جديد.
+        // sheet_key: هوية الشيت والورقة (currentSheetKey)؛ config: الشيت المضبوط وقت القراءة
+        $sheetKey = is_string($result['sheet_key'] ?? null) && trim($result['sheet_key']) !== ''
+            ? trim($result['sheet_key']) : null;
         \Cache::put(self::SHEET_ROWS_CACHE_KEY, ['stamp' => self::sheetStamp(), 'rows' => $result['products'],
-            'tab' => is_string($result['sheet_tab'] ?? null) ? $result['sheet_tab'] : null], self::PRODUCTS_CACHE_SECONDS);
+            'tab' => is_string($result['sheet_tab'] ?? null) ? $result['sheet_tab'] : null,
+            'sheet_key' => $sheetKey, 'config' => $config], self::PRODUCTS_CACHE_SECONDS);
+        if ($sheetKey !== null) {
+            \Cache::forever(self::SHEET_KEY_CACHE_KEY, ['sheet_key' => $sheetKey, 'config' => $config]);
+        }
         return $result['products'];
     }
 
@@ -193,7 +248,8 @@ class ProductController extends Controller
         // وتعرض فقط مرشحات آخر تشغيل (run_id) لكل sku_key.
         $candidateRows = [];
         try {
-            $candidateRows = DB::table('curation_candidates')
+            // مرشحات الشيت الحالي بس (sheet_key، SheetScope): الصف 5 بشيت تاني منتج تاني
+            $candidateRows = SheetScope::apply(DB::table('curation_candidates'), 'curation_candidates')
                 ->orderBy('id', 'asc')
                 ->get()
                 ->map(fn ($r) => (array) $r)
@@ -208,7 +264,8 @@ class ProductController extends Controller
         // فقيمة has_error المحفوظة مع صفوف الشيت (من get_products) تبقى قديمة حتى الكتابة التالية في الشيت
         $failures = null;
         try {
-            $failures = DB::table('product_failures')->pluck('error_message', 'barcode')->all();
+            $failures = SheetScope::apply(DB::table('product_failures'), 'product_failures')
+                ->pluck('error_message', 'barcode')->all();
         } catch (\Throwable $e) {
             // الجدول غير موجود بعد: تبقى قيم get_products
         }

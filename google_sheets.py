@@ -68,8 +68,13 @@ _redis_cache_available = None
 
 # مكان ملفات الكاش المحلية (قابل للتغيير في الاختبارات)
 CACHE_DIR = os.path.dirname(os.path.abspath(__file__))
-PRODUCTS_CACHE_VERSION = 2
-BRAND_CACHE_VERSION = 2
+# 3: الكاش يحمل sheet_key (الملف:التبويب الذي قُرئ منه) و source (الرابط والتبويب كما في الإعداد): كاش شيت آخر لا يُخدم
+PRODUCTS_CACHE_VERSION = 3
+# 3: الكاش يحمل الشيت الذي قُرئت منه ورقة Brands Mapping (لكل ملف شيت ورقته)
+BRAND_CACHE_VERSION = 3
+# آخر sheet_key معروف لهذا الإعداد (لا يحذفه clear_cache): الكتّاب بلا ورقة مفتوحة يختمون صفوفهم به
+SHEET_KEY_CACHE = "sheet_key_cache.json"
+SHEET_KEY_VERSION = 1
 
 HEARTBEAT_KEY = "writebehind:heartbeat"
 DIRTY_SET_KEY = "writebehind:dirty_set"
@@ -105,6 +110,20 @@ FILL_IF_EMPTY_KEYS = (frozenset(STORE_CATEGORY_KEYS.values())
 _TRANSIENT_CODES = (429, 500, 502, 503, 504)
 _sleep = time.sleep      # قابلة للاستبدال في الاختبارات
 _now = time.time
+
+# تشغيل تغيّر شيته في الإعدادات أثناءه (main: sheet_changed) يوقف كتاباته في الشيت: update_image_link و
+# update_product_metadata تعيدان False بلا جدولة حتى نهاية العملية
+_frozen_reason = None
+
+
+def freeze_writes(reason):
+    """يوقف كل كتابة جديدة في الشيت من هذه العملية (reason للسجل)؛ None يعيدها."""
+    global _frozen_reason
+    _frozen_reason = reason or None
+
+
+def writes_frozen():
+    return _frozen_reason is not None
 
 
 class SheetConfigError(Exception):
@@ -269,10 +288,116 @@ def cached_products():
     """
     صفوف المنتجات من كاش آخر قراءة للشيت (products_cache.json، كما يعيدها get_products) بلا أي طلب لـ Google ومهما
     كان عمرها، أو None بلا كاش. للقراءة فقط (اقتراحات الباركود): كل كتابة تُتحقق من الصف الحي وقت التفريغ.
+    كاش قُرئ من شيت أو تبويب غير المضبوط الآن (source المحفوظ معه ≠ الإعداد) يعيد None: هذا يُعرف بلا أي طلب. كاش بلا
+    source (كتبه شيء غير get_products) يُخدم كما كان: لا طريقة رخيصة لمعرفة مصدره.
     """
     cached = _read_cache("products_cache.json", float("inf"), PRODUCTS_CACHE_VERSION)
+    if cached and cached.get("source") is not None and not _same_source(cached.get("source"), _configured_source()):
+        return None
     products = cached.get("products") if cached else None
     return [p for p in products if isinstance(p, dict)] if isinstance(products, list) else None
+
+
+# ---------------------------------------------------------------------------
+# هوية الشيت (sheet_key): أي ملف وأي تبويب
+# ---------------------------------------------------------------------------
+
+def sheet_key(worksheet):
+    """
+    هوية الورقة: f"{spreadsheet_id}:{worksheet_id}" (معرّف الملف في Google ومعرّف التبويب gid)، أو None إذا لم تُعرف.
+    بالمعرّفات لا بالأسماء: إعادة تسمية التبويب أو الملف لا تغيّرها. صفوف قاعدة البيانات (المرشحات، الطابور، الأخطاء،
+    طابور الكتابة) تُختم بها، فصف 19 من شيت جديد لا يأخذ ما يخص صف 19 من الشيت القديم.
+    """
+    try:
+        spreadsheet_id = getattr(getattr(worksheet, "spreadsheet", None), "id", None)
+        worksheet_id = getattr(worksheet, "id", None)
+    except Exception:  # noqa: BLE001 - ورقة مزيّفة أو خصائص ناقصة: الهوية غير معروفة
+        return None
+    if not isinstance(spreadsheet_id, str) or not spreadsheet_id.strip() or worksheet_id is None \
+            or str(worksheet_id).strip() == "":
+        return None
+    return f"{spreadsheet_id.strip()}:{str(worksheet_id).strip()}"[:128]
+
+
+def _source(sheet_name_or_url, tab_name):
+    return [str(sheet_name_or_url or "").strip(), str(tab_name or "").strip()]
+
+
+def _configured_source():
+    """الشيت والتبويب كما في إعداد هذه العملية (config)."""
+    return _source(getattr(config, "SPREADSHEET_NAME_OR_URL", ""), getattr(config, "SPREADSHEET_TAB_NAME", ""))
+
+
+def _same_source(a, b):
+    return isinstance(a, (list, tuple)) and isinstance(b, (list, tuple)) and list(a) == list(b)
+
+
+def _disk_source(fallback=None):
+    """
+    الشيت والتبويب كما في ملف .env الآن (config.env_sheet_setting)، والمفتاح الغائب من الملف من fallback؛ None إذا
+    الملف غير موجود (لا يُحكم بأن الشيت تغيّر).
+    """
+    reader = getattr(config, "env_sheet_setting", None)
+    disk = reader() if callable(reader) else None
+    if disk is None:
+        return None
+    fallback = fallback or _configured_source()
+    return _source(disk.get("SPREADSHEET_NAME_OR_URL", fallback[0]), disk.get("SPREADSHEET_TAB_NAME", fallback[1]))
+
+
+def sheet_setting_snapshot():
+    """ما في .env الآن عن الشيت (للمقارنة لاحقاً بـ sheet_setting_changed)، أو None بلا ملف .env."""
+    return _disk_source()
+
+
+def sheet_setting_changed(snapshot):
+    """
+    هل صار .env يسمّي شيتاً أو تبويباً غير snapshot (sheet_setting_snapshot عند بدء التشغيل)؟ قراءة ملف صغير، بلا طلب
+    لـ Google. snapshot None أو .env غير موجود: False (لا يُوقف شيء على تخمين).
+    """
+    if snapshot is None:
+        return False
+    now = _disk_source(fallback=snapshot)
+    return now is not None and not _same_source(now, snapshot)
+
+
+_opened = {"source": None, "sheet_key": None}
+
+
+def _note_worksheet(worksheet, sheet_name_or_url, tab_name):
+    """
+    يتذكر هوية الورقة التي فتحتها هذه العملية (في الذاكرة وفي SHEET_KEY_CACHE) مع إعدادها وما في .env لحظة الفتح:
+    get_products لا يكتب الكاش إذا تغيّر .env بعدها، والكتّاب بلا ورقة يختمون صفوفهم بـ current_sheet_key.
+    """
+    key = sheet_key(worksheet)
+    source = _source(sheet_name_or_url, tab_name)
+    try:
+        worksheet._laqta_source = source
+        worksheet._laqta_disk = _disk_source(fallback=source)
+    except Exception:  # noqa: BLE001 - ورقة لا تقبل خصائص إضافية: لا مقارنة لاحقة
+        pass
+    if not key:
+        return
+    _opened.update(source=source, sheet_key=key)
+    cached = _read_cache(SHEET_KEY_CACHE, float("inf"), SHEET_KEY_VERSION)
+    if not cached or cached.get("sheet_key") != key or not _same_source(cached.get("source"), source):
+        _write_cache(SHEET_KEY_CACHE, {"sheet_key": key, "source": source}, SHEET_KEY_VERSION)
+
+
+def current_sheet_key():
+    """
+    sheet_key الشيت المضبوط الآن بلا أي طلب لـ Google: الورقة التي فتحتها هذه العملية، وإلا آخر هوية محفوظة
+    (SHEET_KEY_CACHE ثم products_cache.json) ما دام مصدرها هو الإعداد الحالي (الرابط والتبويب). None إذا لم تُعرف.
+    """
+    source = _configured_source()
+    if _opened["sheet_key"] and _same_source(_opened["source"], source):
+        return _opened["sheet_key"]
+    for name, version in ((SHEET_KEY_CACHE, SHEET_KEY_VERSION), ("products_cache.json", PRODUCTS_CACHE_VERSION)):
+        cached = _read_cache(name, float("inf"), version)
+        key = (cached or {}).get("sheet_key")
+        if isinstance(key, str) and key and _same_source(cached.get("source"), source):
+            return key
+    return None
 
 
 def _write_cache(name, payload, version):
@@ -433,14 +558,18 @@ def open_worksheet(client, sheet_name_or_url, worksheet_index=0):
     tab_name = (getattr(config, "SPREADSHEET_TAB_NAME", "") or "").strip()
     if tab_name and worksheet_index == 0:
         try:
-            return _retrying(sh.worksheet, tab_name)
+            worksheet = _retrying(sh.worksheet, tab_name)
         except gspread.exceptions.WorksheetNotFound:
             try:
                 titles = [ws.title for ws in sh.worksheets()]
             except Exception:
                 titles = []
             raise SheetConfigError(f"التبويب '{tab_name}' غير موجود في الشيت. التبويبات المتاحة: {titles}")
-    return _retrying(sh.get_worksheet, worksheet_index)
+    else:
+        worksheet = _retrying(sh.get_worksheet, worksheet_index)
+    if worksheet is not None:
+        _note_worksheet(worksheet, sheet_name_or_url, tab_name if worksheet_index == 0 else f"#{worksheet_index}")
+    return worksheet
 
 
 _HEADER_TTL = 60.0
@@ -505,9 +634,12 @@ def get_products(worksheet):
     """
     جلب كل المنتجات مع رقم الصف. الأعمدة تُحدد بالعناوين؛ يُرفع SheetSchemaError إذا لم يوجد عمود الاسم.
     البراند الفارغ يبقى ''. تعيد (products, link_idx). الأخطاء المؤقتة تُعاد محاولتها (SheetTransientError إذا استمرت).
+    الكاش (products_cache.json، ساعة) يُخدم فقط إذا قُرئ من هذه الورقة نفسها (sheet_key)؛ كاش شيت أو تبويب آخر يُقرأ
+    الشيت بدلاً منه ويُكتب فوقه. ورقة فُتحت قبل أن يتغيّر الشيت في .env (تشغيل جارٍ بالإعداد القديم) لا تكتب الكاش.
     """
+    key = sheet_key(worksheet)
     cached = _read_cache("products_cache.json", 3600, PRODUCTS_CACHE_VERSION)
-    if cached:
+    if cached and cached.get("sheet_key") == key:
         return cached["products"], cached["link_idx"]
 
     rows = _retrying(worksheet.get_all_values)
@@ -561,8 +693,19 @@ def get_products(worksheet):
             "search_query": f"{product_name} {brand}".strip(),
         })
 
-    _write_cache("products_cache.json", {"products": products, "link_idx": link_idx}, PRODUCTS_CACHE_VERSION)
+    source = getattr(worksheet, "_laqta_source", None)
+    if _sheet_moved_since_open(worksheet):
+        logger.warning("[Google Sheets Cache] الشيت تغيّر في الإعدادات بعد فتح هذه الورقة؛ لم يُكتب كاش صفوفها.")
+    else:
+        _write_cache("products_cache.json", {"products": products, "link_idx": link_idx, "sheet_key": key,
+                                             "source": source if isinstance(source, list) else None},
+                     PRODUCTS_CACHE_VERSION)
     return products, link_idx
+
+
+def _sheet_moved_since_open(worksheet):
+    """هل تغيّر الشيت أو التبويب في .env منذ فتح هذه الورقة (open_worksheet حفظ ما كان فيه)؟"""
+    return sheet_setting_changed(getattr(worksheet, "_laqta_disk", None))
 
 
 # ---------------------------------------------------------------------------
@@ -831,6 +974,9 @@ class SQLiteTransactionQueue:
                 "ALTER TABLE sheet_updates ADD INDEX IF NOT EXISTS idx_sheet_updates_ident (ident)",
                 "ALTER TABLE sheet_updates ADD INDEX IF NOT EXISTS idx_sheet_updates_row (`row_number`)",
                 "ALTER TABLE sheet_updates ADD INDEX IF NOT EXISTS idx_sheet_updates_seq (seq)",
+                # الورقة التي جُدولت لها الكتابة (google_sheets.sheet_key): المُفرِّغ يكتب فقط كتابات الورقة التي فتحها
+                "ALTER TABLE sheet_updates ADD COLUMN IF NOT EXISTS sheet_key VARCHAR(128) NULL",
+                "ALTER TABLE sheet_updates ADD INDEX IF NOT EXISTS idx_sheet_updates_sheet (sheet_key)",
             ):
                 cursor.execute(stmt)
             conn.commit()
@@ -838,7 +984,7 @@ class SQLiteTransactionQueue:
             conn.close()
 
     def append_update(self, row_number, col_index, value, col_name=None, key_barcode=None, key_name=None,
-                      key_size=None, key_brand=None, col_key=None, seq=None, expect_value=None):
+                      key_size=None, key_brand=None, col_key=None, seq=None, expect_value=None, sheet_key=None):
         """
         جدولة كتابة خلية. col_key: المفتاح المنطقي للعمود ('link' أو 'meta:<key>') ويُحدد عموده وقت الكتابة؛
         col_index/col_name للكتابات القديمة فقط. يعيد معرّف الصف.
@@ -847,8 +993,11 @@ class SQLiteTransactionQueue:
         seq: تسلسل كتابة نُقلت من Redis (بوقت جدولتها هناك)؛ نقلها مرة أخرى (نقل جزئي أو حمولة تغيرت أثناء النقل)
         لا يكرر الصف. دونه يُولَّد الآن ولا يقل عن أكبر seq في الطابور + 1: الترتيب بين العمليات يبقى صحيحاً حتى
         لو رجعت ساعة الجهاز أو وقعت كتابتان في نفس نبضة الساعة.
+        sheet_key: الورقة التي تخصها الكتابة (sheet_key(worksheet))؛ دونه current_sheet_key(). المُفرِّغ لا يكتبها
+        إلا في هذه الورقة.
         """
         expect = _expectation(key_barcode, key_name, key_size, key_brand)
+        sheet_key = _stamp_key(sheet_key)
         ident = _identity_hash(expect)
         conn = self._connect()
         try:
@@ -866,11 +1015,11 @@ class SQLiteTransactionQueue:
                 seq = _next_seq(floor=int((cursor.fetchone() or {}).get("top") or 0) + 1)
             cursor.execute(
                 "INSERT INTO sheet_updates (`row_number`, `col_index`, `value`, col_name, col_key, seq, ident, "
-                "expect_value, key_barcode, key_name, key_size, key_brand) "
-                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                "expect_value, sheet_key, key_barcode, key_name, key_size, key_brand) "
+                "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)",
                 (row_number, -1 if col_index is None else col_index, "" if value is None else str(value),
                  col_name, col_key, int(seq), ident, None if expect_value is None else str(expect_value),
-                 key_barcode, key_name, key_size, key_brand)
+                 sheet_key, key_barcode, key_name, key_size, key_brand)
             )
             new_id = getattr(cursor, "lastrowid", None)
             conn.commit()
@@ -878,6 +1027,16 @@ class SQLiteTransactionQueue:
             conn.close()
         clear_cache()
         return new_id
+
+
+def _stamp_key(key):
+    """الـ sheet_key الذي تُختم به كتابة: الممرر، وإلا current_sheet_key()؛ None إذا لم يُعرف."""
+    if key:
+        return str(key)[:128]
+    try:
+        return current_sheet_key()
+    except Exception:  # noqa: BLE001 - الختم لا يوقف الكتابة؛ None = سلوك ما قبل sheet_key
+        return None
 
 
 def _outbox_lock_name():
@@ -1014,19 +1173,23 @@ def outbox_summary(since_ts=None):
     return out
 
 
-def outbox_due_count(now=None):
+def outbox_due_count(now=None, sheet_key=None):
     """
     كم كتابة تنتظر التفريغ الآن: PENDING، و FAILED حلّ موعد إعادة محاولتها (نفس شرط _flush_locked). صفر = لا داعي
     لفتح الشيت: مؤقت التفريغ بين التشغيلات (laqta-outbox-flush.timer) يتخطى Google حينها فلا يستهلك حصته.
+    sheet_key: كتابات هذه الورقة فقط (وكتابات بلا sheet_key)، فكتابات شيت قديم معلقة لا تفتح الشيت الجديد كل دقيقتين.
     أخطاء قاعدة البيانات تُرفع.
     """
+    sql = ("SELECT COUNT(*) AS n FROM sheet_updates WHERE (sync_status = 'PENDING' "
+           "OR (sync_status = 'FAILED' AND (next_attempt_at IS NULL OR next_attempt_at <= %s)))")
+    params = [int(_now() if now is None else now)]
+    if sheet_key:
+        sql += " AND (sheet_key IS NULL OR sheet_key = %s)"
+        params.append(str(sheet_key))
     conn = (_queue._connect if _queue is not None else _db_connect)()
     try:
         cursor = conn.cursor()
-        cursor.execute(
-            "SELECT COUNT(*) AS n FROM sheet_updates WHERE sync_status = 'PENDING' "
-            "OR (sync_status = 'FAILED' AND (next_attempt_at IS NULL OR next_attempt_at <= %s))",
-            (int(_now() if now is None else now),))
+        cursor.execute(sql, tuple(params))
         return int((cursor.fetchone() or {}).get("n") or 0)
     finally:
         conn.close()
@@ -1103,16 +1266,33 @@ class GoogleSheetsBatchWorker(threading.Thread):
             conn.close()
 
     def _flush_locked(self, worksheet, conn, cursor):
-        """Body of one flush; the caller holds the outbox lock and closes the connection."""
+        """
+        Body of one flush; the caller holds the outbox lock and closes the connection. Only the writes queued for the
+        worksheet it opened (sheet_key) and the ones without a sheet_key are sent; writes for another sheet stay
+        PENDING (logged once per sheet) and are never written into this one.
+        """
         now = _now()
-        cursor.execute(
-            "SELECT id, `row_number`, `col_index`, `value`, col_name, col_key, seq, ident, relocated_from, "
-            "key_barcode, key_name, key_size, key_brand, attempts, expect_value "
-            "FROM sheet_updates WHERE sync_status = 'PENDING' "
-            "OR (sync_status = 'FAILED' AND (next_attempt_at IS NULL OR next_attempt_at <= %s)) "
-            "ORDER BY id LIMIT %s",
-            (int(now), OUTBOX_BATCH),
-        )
+        key = sheet_key(worksheet)
+        due = ("(sync_status = 'PENDING' "
+               "OR (sync_status = 'FAILED' AND (next_attempt_at IS NULL OR next_attempt_at <= %s)))")
+        if key:
+            _report_foreign_writes(cursor, due, int(now), key)
+            cursor.execute(
+                "SELECT id, `row_number`, `col_index`, `value`, col_name, col_key, seq, ident, relocated_from, "
+                "key_barcode, key_name, key_size, key_brand, attempts, expect_value, sheet_key "
+                f"FROM sheet_updates WHERE {due} AND (sheet_key IS NULL OR sheet_key = %s) "
+                "ORDER BY id LIMIT %s",
+                (int(now), key, OUTBOX_BATCH),
+            )
+        else:
+            cursor.execute(
+                "SELECT id, `row_number`, `col_index`, `value`, col_name, col_key, seq, ident, relocated_from, "
+                "key_barcode, key_name, key_size, key_brand, attempts, expect_value "
+                "FROM sheet_updates WHERE sync_status = 'PENDING' "
+                "OR (sync_status = 'FAILED' AND (next_attempt_at IS NULL OR next_attempt_at <= %s)) "
+                "ORDER BY id LIMIT %s",
+                (int(now), OUTBOX_BATCH),
+            )
         rows = list(cursor.fetchall())
         if not rows:
             return
@@ -1203,7 +1383,7 @@ class GoogleSheetsBatchWorker(threading.Thread):
         _set_status(cursor, [r["id"] for r, col in ready if newest[(r["row_number"], col)][0] is not r],
                     "SUPERSEDED")
         ready = sorted(newest.values(), key=lambda item: order(item[0]))
-        stale = _older_than_written(cursor, worksheet, headers, ready)
+        stale = _older_than_written(cursor, worksheet, headers, ready, sheet_key=key)
         _set_status(cursor, sorted(stale), "SUPERSEDED", "a newer value was already written to this cell")
         ready = [(r, col) for r, col in ready if r["id"] not in stale]
 
@@ -1372,7 +1552,29 @@ def _read_cells(worksheet, cells):
     return out
 
 
-def _older_than_written(cursor, worksheet, headers, items):
+def _report_foreign_writes(cursor, due, now, key):
+    """
+    كتابات مستحقة لورقة غير الورقة المفتوحة (شيت أو تبويب قبل تبديل الشيت): تبقى PENDING ولا تُكتب هنا؛ تُذكر في
+    السجل مرة لكل ورقة في هذه العملية. لا يرفع أبداً.
+    """
+    try:
+        cursor.execute(
+            f"SELECT sheet_key, COUNT(*) AS n FROM sheet_updates WHERE {due} AND sheet_key IS NOT NULL "
+            "AND sheet_key <> %s GROUP BY sheet_key", (now, key))
+        for r in cursor.fetchall() or []:
+            other = r.get("sheet_key")
+            if other and other not in _reported_foreign_keys:
+                _reported_foreign_keys.add(other)
+                logger.warning("[Sheets Outbox] %s كتابة معلقة تخص شيتاً أو تبويباً آخر (%s) غير المفتوح الآن (%s): "
+                               "لن تُكتب في هذا الشيت وتبقى في الطابور.", r.get("n"), other, key)
+    except Exception as e:  # noqa: BLE001 - السجل فقط؛ الاستعلام الرئيسي يرشّح بنفسه
+        logger.debug("[Sheets Outbox] تعذر عدّ كتابات الشيتات الأخرى: %s", e)
+
+
+_reported_foreign_keys = set()
+
+
+def _older_than_written(cursor, worksheet, headers, items, sheet_key=None):
     """
     معرّفات الكتابات التي كُتبت بعدها قيمة أحدث (seq أكبر) لنفس العمود؛ لا تُرسل أبداً، كي لا تمحو قيمةٌ قديمة
     قيمةً أحدث (بين العمليات، وحمولات Redis المنقولة متأخرة، وإعادة المحاولة المؤجلة). الكتابة قديمة إذا:
@@ -1396,9 +1598,14 @@ def _older_than_written(cursor, worksheet, headers, items):
     if idents:
         clauses.append("ident IN (" + ",".join("%s" for _ in idents) + ")")
         params += idents
+    scope = ""
+    if sheet_key:
+        # كتابة نجحت في شيت آخر لا تجعل كتابة هذه الورقة قديمة
+        scope = " AND (sheet_key IS NULL OR sheet_key = %s)"
+        params.append(sheet_key)
     cursor.execute(
         "SELECT id, `row_number`, relocated_from, col_key, ident, seq, key_barcode, key_name, key_size, key_brand "
-        "FROM sheet_updates WHERE sync_status = 'SYNCED' AND seq > %s AND (" + " OR ".join(clauses) + ")",
+        "FROM sheet_updates WHERE sync_status = 'SYNCED' AND seq > %s AND (" + " OR ".join(clauses) + ")" + scope,
         tuple(params),
     )
     written = [w for w in cursor.fetchall() if w.get("seq") is not None and w.get("col_key")]
@@ -1486,10 +1693,11 @@ def _get_redis():
         return None
 
 
-def _merged_payload(cached, row_number, updates, expect, seqs):
+def _merged_payload(cached, row_number, updates, expect, seqs, sheet_key=None):
     """
     الحمولة بعد الدمج بالصيغة {'v': 2, 'row_index', 'updates': {col_key: value}, 'seqs': {col_key: seq},
-    'expect'}، أو None إذا تعذر الدمج بأمان (صيغة غير معروفة أو قديمة بأرقام أعمدة، أو هوية مختلفة).
+    'expect', 'sheet_key'}، أو None إذا تعذر الدمج بأمان (صيغة غير معروفة أو قديمة بأرقام أعمدة، أو هوية مختلفة،
+    أو حمولة معلقة لورقة أخرى).
     """
     payload = json.loads(cached) if cached else {"v": REDIS_PAYLOAD_VERSION, "row_index": row_number,
                                                  "updates": {}, "seqs": {}}
@@ -1501,20 +1709,26 @@ def _merged_payload(cached, row_number, updates, expect, seqs):
         # حمولة معلقة لمنتج آخر على نفس رقم الصف: لا ندمج (وإلا كُتبت قيمها بهوية المنتج الجديد)
         logger.warning("[Redis Write-Behind] حمولة الصف %s تخص هوية أخرى؛ استخدام طابور MariaDB.", row_number)
         return None
+    if cached and (payload.get("sheet_key") or None) != (sheet_key or None):
+        # حمولة معلقة لنفس رقم الصف في شيت آخر (قبل تبديل الشيت): لا ندمج، فلكل ورقة كتاباتها
+        logger.warning("[Redis Write-Behind] حمولة الصف %s تخص شيتاً آخر؛ استخدام طابور MariaDB.", row_number)
+        return None
     payload["row_index"] = row_number
     for col_key, value in updates.items():
         payload["updates"][str(col_key)] = value
         payload["seqs"][str(col_key)] = seqs[col_key]
     if expect:
         payload["expect"] = expect
+    if sheet_key:
+        payload["sheet_key"] = sheet_key
     return json.dumps(payload, ensure_ascii=False)
 
 
-def _redis_merge_payload(r, key, row_number, updates, expect, seqs):
+def _redis_merge_payload(r, key, row_number, updates, expect, seqs, sheet_key=None):
     """دمج ذري (WATCH/MULTI) لتحديثات الصف في حمولته؛ يعيد False ليُستخدم طابور MariaDB."""
     cache_key = f"{CACHE_PREFIX}{key}"
     if getattr(r, "pipeline", None) is None:
-        merged = _merged_payload(r.get(cache_key), row_number, updates, expect, seqs)
+        merged = _merged_payload(r.get(cache_key), row_number, updates, expect, seqs, sheet_key)
         if merged is None:
             return False
         r.set(cache_key, merged)
@@ -1524,7 +1738,7 @@ def _redis_merge_payload(r, key, row_number, updates, expect, seqs):
         with r.pipeline() as p:
             try:
                 p.watch(cache_key)
-                merged = _merged_payload(p.get(cache_key), row_number, updates, expect, seqs)
+                merged = _merged_payload(p.get(cache_key), row_number, updates, expect, seqs, sheet_key)
                 if merged is None:
                     p.unwatch()
                     return False
@@ -1537,7 +1751,7 @@ def _redis_merge_payload(r, key, row_number, updates, expect, seqs):
     return False
 
 
-def _redis_write_behind(row_number, updates, expect=None):
+def _redis_write_behind(row_number, updates, expect=None, sheet_key=None):
     """
     جدولة تحديثات صف عبر Redis؛ updates: {مفتاح منطقي للعمود: قيمة} (لا أرقام أعمدة: العمود يُحدد وقت الكتابة).
     كل قيمة تحمل seq وقت جدولتها. sync_worker ينقل الحمولة إلى طابور MariaDB نفسه (قناة كتابة واحدة).
@@ -1551,7 +1765,7 @@ def _redis_write_behind(row_number, updates, expect=None):
             return False
         key = f"row_{row_number}"
         seqs = {col_key: _next_seq() for col_key in updates}
-        if not _redis_merge_payload(r, key, row_number, updates, expect, seqs):
+        if not _redis_merge_payload(r, key, row_number, updates, expect, seqs, sheet_key):
             return False
         r.sadd(DIRTY_SET_KEY, key)
         return True
@@ -1578,12 +1792,17 @@ def update_image_link(worksheet, row_number, link_column_index, image_link, barc
     image_link = migrated_delivery_url(image_link) or image_link
     expect = _expectation(barcode, product_name, size, brand)
     try:
-        if _redis_write_behind(row_number, {LINK_KEY: image_link}, expect):
+        if writes_frozen():
+            logger.warning("[Google Sheets] %s؛ لم يُكتب رابط الصف %s.", _frozen_reason, row_number)
+            return False
+        key = sheet_key(worksheet) or _stamp_key(None)
+        if _redis_write_behind(row_number, {LINK_KEY: image_link}, expect, sheet_key=key):
             logger.info("[Redis Write-Behind] جدولة رابط الصف %s.", row_number)
             return True
 
         if _queue is not None and _worker is not None:
-            _queue.append_update(row_number, link_column_index, image_link, col_key=LINK_KEY, **_outbox_keys(expect))
+            _queue.append_update(row_number, link_column_index, image_link, col_key=LINK_KEY, sheet_key=key,
+                                 **_outbox_keys(expect))
             logger.info("[Sheets Outbox] جدولة رابط الصف %s.", row_number)
             return True
 
@@ -1607,6 +1826,11 @@ def update_image_link(worksheet, row_number, link_column_index, image_link, barc
         return False
 
 
+def _item_sheet(item):
+    """sheet_key الصف إذا مرّره المستدعي؛ دونه يختم append_update بالشيت المضبوط (current_sheet_key)."""
+    return {"sheet_key": str(item["sheet_key"])} if item.get("sheet_key") else {}
+
+
 def queue_link_writes(items):
     """
     يجدول كتابة رابط صورة لكل صف في طابور MariaDB (outbox) مباشرة، بلا Redis وبلا كتابة مباشرة في الشيت (ترحيل روابط
@@ -1622,7 +1846,8 @@ def queue_link_writes(items):
         expect = _expectation(item.get("barcode"), item.get("product_name"), item.get("size"), item.get("brand"))
         extra = {"expect_value": str(item["replace"])} if item.get("replace") is not None else {}
         out[int(item["row_number"])] = queue.append_update(int(item["row_number"]), None, str(item["value"]),
-                                                           col_key=LINK_KEY, **_outbox_keys(expect), **extra)
+                                                           col_key=LINK_KEY, **_item_sheet(item),
+                                                           **_outbox_keys(expect), **extra)
     return out
 
 
@@ -1638,7 +1863,8 @@ def queue_barcode_writes(items):
     for item in items or ():
         expect = _expectation(item.get("barcode"), item.get("product_name"), item.get("size"), item.get("brand"))
         out[int(item["row_number"])] = queue.append_update(int(item["row_number"]), None, str(item["value"]),
-                                                           col_key=BARCODE_KEY, **_outbox_keys(expect))
+                                                           col_key=BARCODE_KEY, **_item_sheet(item),
+                                                           **_outbox_keys(expect))
     return out
 
 
@@ -1667,6 +1893,9 @@ def update_product_metadata(worksheet, row_number, metadata, barcode=None, produ
     """
     expect = _expectation(barcode, product_name, size, brand)
     try:
+        if writes_frozen():
+            logger.warning("[Google Sheets] %s؛ لم تُكتب البيانات الوصفية للصف %s.", _frozen_reason, row_number)
+            return False
         headers = _worksheet_headers(worksheet, fresh=True)
         normalized = [normalize_header(h) for h in headers]
         col_indices = {}
@@ -1695,15 +1924,17 @@ def update_product_metadata(worksheet, row_number, metadata, barcode=None, produ
 
         writes = {f"{META_PREFIX}{k}": str(metadata[k]) for k in col_indices}
         writes.update({key: value for key, (_col, value) in store.items()})
-        if _redis_write_behind(row_number, writes, expect):
+        sheet = sheet_key(worksheet) or _stamp_key(None)
+        if _redis_write_behind(row_number, writes, expect, sheet_key=sheet):
             return True
 
         if _queue is not None and _worker is not None:
             for key, col in col_indices.items():
                 _queue.append_update(row_number, col, str(metadata[key]), col_name=headers[col],
-                                     col_key=f"{META_PREFIX}{key}", **_outbox_keys(expect))
+                                     col_key=f"{META_PREFIX}{key}", sheet_key=sheet, **_outbox_keys(expect))
             for key, (col, value) in store.items():
-                _queue.append_update(row_number, col, value, col_name=headers[col], col_key=key, **_outbox_keys(expect))
+                _queue.append_update(row_number, col, value, col_name=headers[col], col_key=key, sheet_key=sheet,
+                                     **_outbox_keys(expect))
             return True
 
         if expect:
@@ -1821,13 +2052,15 @@ def _brands_worksheet(sh):
 
 def _read_brand_sheet(client, sheet_name_or_url):
     """مرادفات ورقة Brands Mapping كما في الشيت (كاش 5 دقائق)؛ أي خطأ قراءة يُرفع."""
+    # الكاش لكل ملف شيت: ورقة Brands Mapping لشيت آخر (بعد تبديل الشيت) لا تُخدم
     cached = _read_cache("brand_mappings_cache.json", 300, BRAND_CACHE_VERSION)
-    if cached:
+    if cached and cached.get("sheet") == str(sheet_name_or_url or "").strip():
         return cached["mappings"]
     sh = _open_spreadsheet(client, sheet_name_or_url)
     worksheet = _brands_worksheet(sh)
     mappings = parse_brand_mapping_rows(worksheet.get_all_values())
-    _write_cache("brand_mappings_cache.json", {"mappings": mappings}, BRAND_CACHE_VERSION)
+    _write_cache("brand_mappings_cache.json", {"mappings": mappings, "sheet": str(sheet_name_or_url or "").strip()},
+                 BRAND_CACHE_VERSION)
     return mappings
 
 

@@ -11,6 +11,25 @@ causes: the quality gate threw away white-background packshots, an unverified "l
 success, siblings of the right product outranked it, and reviewers' rejections were never remembered. The search
 core was rebuilt and wired into the queue, the dashboard actions and the sheet writes. Every claim below has a test.
 
+### Fixed: data from the old sheet after switching the sheet or its tab
+
+`sheet_key` is `<spreadsheet id>:<worksheet gid>`, so renaming a tab doesn't change it.
+- **Caches.**
+  - `products_cache.json` (v3) and `brand_mappings_cache.json` (v3) record the sheet they were read from, and are used only for that sheet.
+  - The dashboard's sheet-rows cache also misses when `SPREADSHEET_NAME_OR_URL` or `SPREADSHEET_TAB_NAME` changes, including an edit straight in `.env`.
+- **The database.**
+  - `curation_candidates`, `automation_queue`, `product_failures` and `sheet_updates` get a `sheet_key` column (additive).
+  - Legacy rows are stamped once with the current sheet (`system_settings.legacy_sheet_key`).
+  - The review screen, the badge, the queue state and retries read only the current sheet's rows.
+  - Approvals (`resolved_products`) stay shared across sheets.
+  - Switching back brings the old sheet's candidates back.
+- **Pending sheet writes** are written only to their own sheet. Before this, a write queued for the old sheet could land on the same row number in the new one.
+- **Runs.**
+  - The worker only takes its own sheet's tasks.
+  - Saving another sheet during a run is refused (409, «وقّفه أولاً»).
+  - If `.env` changes under a running worker, it stops writes and ends the run («الشيت تغيّر أثناء التشغيل»).
+- **The UI.** «اليوم» and «المراجعة» show «الشيت: … · الورقة: …», linked to the sheet settings for the owner.
+
 ### UI redesign, phase 6: touch screens and screen readers
 
 - **Touch, measured on 6 viewports from 320px to a tablet.**
