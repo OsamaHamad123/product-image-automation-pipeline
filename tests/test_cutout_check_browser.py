@@ -5,7 +5,7 @@ dashboard/vendor, node Playwright or Chromium is missing).
 
 * the review screen's toggle «منتج واحد | بالجملة | فحص القص» with the third one on; 2-3 card columns at 1440;
 * every picture on dark, light and checker side by side; a filter shows only its pictures;
-* «أعد القص بـPhotoRoom» shows before / after and waits; «اعتمد الجديد» sends the token once and reloads; nothing is
+* «أعد عزل الخلفية» (PhotoRoom) shows before / after and waits; «اعتمد الجديد» sends the token once and reloads; nothing is
   sent before the owner's click;
 * «رجّع القديم» asks first;
 * 1440 and 390 px: no console error, no horizontal scroll at 390. Screenshots go to the test's tmp dir (and to
@@ -299,7 +299,7 @@ def test_the_gallery_in_a_browser(tmp_path):
     assert out["stageBg"][:2] == ["rgb(18, 18, 18)", "rgb(255, 255, 255)"]
     assert out["postsBeforeClick"] == 0                                   # opening the page replaces nothing
     assert out["filtered"] == "Pepsi Black Can 330ml"
-    assert out["compare"][0] == 6 and out["compare"][1].startswith("قص PhotoRoom من الصورة الأصلية المحفوظة")
+    assert out["compare"][0] == 6 and out["compare"][1].startswith("قص جديد بعزل الخلفية من الصورة الأصلية المحفوظة")
     assert out["localDisabled"] is True
     assert out["afterApply"][0] == "/api/cutout/apply" and "/api/cutout/gallery" in out["afterApply"][1]
     assert out["ask"] == "نرجّع الصورة القديمة؟" and out["undoSent"] == 0

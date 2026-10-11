@@ -127,7 +127,7 @@ def test_a_product_without_a_pick_in_a_browser(tmp_path):
     assert len(out["grid"]) == 6 and len(first_row) == 5, out["grid"]
     assert all(c["thumbSeen"] and c["whySeen"] for c in first_row), out["grid"]
     assert all(c["pressed"] == "false" for c in out["grid"])                                 # nothing pre-selected
-    assert out["grid"][0]["why"] == "ليش ما انختارت: قارئ الملصق ما تأكد، والشيت ما فيه حجم"
+    assert out["grid"][0]["why"] == "ليش ما انختارت: قارئ الملصق ما تأكد"
     assert out["approveBefore"] is True and out["sentBefore"] == 0
     assert out["picked"] == ["https://www.carrefouruae.com/np-1.png", False]
     assert out["sent"] == ["https://www.carrefouruae.com/np-1.png"]

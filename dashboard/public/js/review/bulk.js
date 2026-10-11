@@ -883,6 +883,8 @@
             S.local.set(job.key, 'approving');
             const it = S.byKey.get(job.key);
             if (it) S.bulk.selected.delete(tickKey(it));
+            // «آخر قراراتك»: سطر لكل بطاقة، بـ«تراجع» لهي بس وهي محجوزة
+            if (it && R.recordDecision) R.recordDecision('approve', it, { job: job });
         });
         noteReviewed(jobs.map(j => j.key));
         return jobs.length;
@@ -1205,8 +1207,10 @@
         dialog.box = el('div', { className: 'rv-dialog', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'rvRejectTitle' }, [
             el('h2', { className: 'rv-dialog__title', id: 'rvRejectTitle', text: 'ليش ترفضها؟' }),
             el('p', { className: 'rv-dialog__text', text: `رح نرفض الصورة المقترحة لـ ${what}${opts.quick ? ' (اضغط رقم السبب 1–7)' : ''}. `
-                + 'بنسجّل السبب. المنتج اللي إله صور ثانية بيضل بانتظار مراجعتك فيها، واللي ما ضل إله صور بيرجع للطابور ليندوّر عليه من جديد بالتشغيل الجاي. '
                 + 'الصور المعتمدة قبل ما بتنلمس.' }),
+            // شو بيصير بكل منتج: تحت «تفاصيل»، والسطر الفوق قصير
+            el('details', { className: 'rv-details' }, [el('summary', { text: 'تفاصيل' }), el('span', {
+                text: 'بنسجّل السبب. المنتج اللي إله صور ثانية بيضل بانتظار مراجعتك فيها، واللي ما ضل إله صور بيرجع للطابور ليندوّر عليه بالتشغيل الجاي.' })]),
             reasons,
             el('div', { className: 'rv-dialog__actions' }, [
                 confirmBtn,
@@ -1246,7 +1250,7 @@
         }
         if (key === 'Enter') {
             const t = document.activeElement;
-            if (t && t.tagName && /^(BUTTON|A)$/i.test(String(t.tagName))) return false;       // الزر نفسه
+            if (t && t.tagName && /^(BUTTON|A|SUMMARY)$/i.test(String(t.tagName))) return false;       // الزر نفسه، أو «تفاصيل»
             e.preventDefault();
             if (dialog.reason && !e.repeat) {
                 const chosen = dialog.list;
@@ -1282,6 +1286,8 @@
             S.local.set(job.key, 'rejecting');
             const it = S.byKey.get(job.key);
             if (it) B.selected.delete(tickKey(it));
+            // «آخر قراراتك»: سطر لكل بطاقة («تراجع» وهي محجوزة، «تراجع عن الرفض» بعد ما تنبعت)
+            if (it && R.recordDecision) R.recordDecision('reject', it, { job: job, url: job.candidate.url });
         });
         noteReviewed(keys);
         R.rebuild();
@@ -1303,6 +1309,7 @@
         const S = st();
         const B = S.bulk;
         jobs.forEach(job => {
+            if (R.decisionUndone) R.decisionUndone(job);
             if (S.local.get(job.key) === 'rejecting') S.local.delete(job.key);
             if (job.tick) B.selected.add(job.tick);
             B.reviewed.delete(job.key);

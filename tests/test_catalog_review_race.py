@@ -276,7 +276,7 @@ out.approve_url = approve.body.image_url;
     assert out["reject_bytes"] == ["a2" * 32, "https://www.carrefouruae.com/p/a2"]
     assert out["alts_after_reject"] == [A_URL]
     # an alternative, not the system pick: the pick and the other images stay for review (contract C2)
-    assert "باقي الصور ما زالت للمراجعة" in out["text_after_reject"] and "رجع للطابور" not in out["text_after_reject"]
+    assert "باقي الصور لسا للمراجعة" in out["text_after_reject"] and "رجع للطابور" not in out["text_after_reject"]
     assert out["approve_identity"] == identity_of(A)
     assert out["approve_category"] == "Dairy" and out["approve_url"] == A_URL
 

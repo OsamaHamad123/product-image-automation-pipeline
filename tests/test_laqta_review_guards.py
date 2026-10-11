@@ -269,7 +269,7 @@ out.second = S().jobs.state().jobs.length;                  // one request at a 
     # single mode confirms a pick with warnings, naming the product
     assert out["refused"][0] == 1
     assert out["refused"][1].startswith("«Prod 1»: تأكد قبل الاعتماد: الباركود بالشيت مختلف")
-    assert "الحجم غير مؤكد" in out["refused"][1]
+    assert "الحجم مش مأكّد" in out["refused"][1]
     assert out["second"] == 2
 
 
@@ -730,10 +730,10 @@ def test_the_reject_texts_say_what_the_server_does(tmp_path):
     out = page(r"""
 openRow(9);
 press('x');
-out.note = document.querySelector('.rv-reasons__note').textContent;
+out.note = document.querySelectorAll('.rv-reasons__note').map(n => n.textContent).join(' ');
 """, tmp_path, fixture([picked(9, "Almarai Milk 2L")]), config={"row": 9})
     # C2: still waiting for review when images remain, back to the queue only when none is left
-    assert "إذا ضل له صور ثانية بيضل بانتظار مراجعتك فيها، وإلا بيرجع للطابور" in out["note"]
+    assert "إذا ضل إله صور ثانية بيضل بانتظار مراجعتك فيها، وإلا بيرجع للطابور" in out["note"]
     assert "المنتج بيرجع للطابور؛" not in out["note"]
 
 

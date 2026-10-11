@@ -5,6 +5,8 @@
   list in its chip with «لقينا بدائل لـ …»; rejecting an alternative (not the system's pick) still stays on the product;
 * «آخر قراراتك» lists this session's last 20 decisions (approve / reject / upload / skip) with «افتح», «تراجع» for a
   held one and «تراجع عن الرفض» for a sent reject, and survives a reload (sessionStorage);
+* bulk mode lists its decisions too, one line per card (A / Enter / Shift+A / the bar, R / X / the dialog): «تراجع»
+  takes back that card only while held, «تراجع عن الرفض» once a reject is sent; the panel sits under the cards there;
 * Ctrl+Z (⌘Z) undoes a held job first, else the latest sent reject after a one-line question; never while typing;
   it is listed in «?».
 """
@@ -272,3 +274,107 @@ out.note = toasts.slice(-1)[0].text;
     assert out["undone"] is True
     assert out["after"] == "Almarai Laban 1L"                  # still on the product the reviewer moved to
     assert out["note"] == "تراجعت عن رفض صورة «Almarai Milk 1L»: رجعت للاقتراحات."
+
+
+# ---------------------------------------------------------------------------
+# 4. «آخر قراراتك» in bulk mode: one line per card
+# ---------------------------------------------------------------------------
+
+BULK = r"""
+const entries = () => document.querySelectorAll('#rvHistoryList li');
+const entryOf = row => entries().find(li => li.textContent.includes(`صف ${row} `));
+const buttonOf = (row, text) => entryOf(row).querySelectorAll('button').find(b => b.textContent === text);
+const cardBox = row => document.querySelectorAll('.rv-card input[type="checkbox"]').find(b => b.getAttribute('data-select') === itemOf(row).key);
+"""
+
+
+@NEEDS_NODE
+def test_bulk_approvals_are_listed_one_per_card_and_undo_takes_back_only_that_card(tmp_path):
+    out = page(BULK + r"""
+await flush();
+out.where = document.getElementById('rvHistory').parentNode === S().dom.bulk;      // under the cards in bulk mode
+press('a', { shiftKey: true });                             // Shift+A: the three ticked cards, held for «تراجع»
+await flush();
+document.getElementById('rvHistoryToggle').click();
+out.items = history();
+out.buttons = [0, 1, 2].map(historyButtons);
+out.stored = JSON.parse(sessionStorage.getItem('laqta.review.history')).map(e => [e.kind, e.row, e.status]);
+buttonOf(71, 'تراجع').click();                              // only the second card
+await flush();
+out.after = [S().jobs.state().heldCount, entryOf(71).textContent.includes('تراجعت'),
+             entryOf(70).textContent.includes('تراجعت'), entryOf(72).textContent.includes('تراجعت'), announced()];
+out.ticked_back = R.bulk.tickedKeys().map(k => String(S().byKey.get(k).product.row_number));
+await finishTimers();                                       // the hold is over: the other two go out
+out.sent = requests('/api/select_image').map(c => String(c.body.row_number)).sort();
+""", tmp_path, config={"mode": "bulk", "approveUndoMs": 5000})
+    assert out["where"] is True
+    assert [t.split(" · ")[0] for t in out["items"]] == ["اعتمدت Almarai Juice 1L", "اعتمدت Almarai Laban 1L",
+                                                         "اعتمدت Almarai Milk 1L"]
+    assert all("بتنبعت بعد شوي" in t for t in out["items"])
+    assert out["buttons"] == [["افتح", "تراجع"]] * 3
+    assert out["stored"] == [["approve", "72", "held"], ["approve", "71", "held"], ["approve", "70", "held"]]
+    assert out["after"] == [2, True, False, False, "تراجعت عن «Almarai Laban 1L»."]
+    assert "71" in out["ticked_back"]                       # the card and its tick are back
+    assert out["sent"] == ["70", "72"]
+
+
+@NEEDS_NODE
+def test_bulk_rejects_are_listed_with_undo_while_held_and_unreject_once_sent(tmp_path):
+    out = page(BULK + r"""
+await flush();
+document.getElementById('rvBulkEligible').click();          // untick all
+await flush();
+cardBox(70).click();
+cardBox(72).click();
+await flush();
+document.getElementById('rvBulkReject').click();
+press('2');
+press('Enter');
+await flush();
+document.getElementById('rvHistoryToggle').click();
+out.held = [history().map(t => t.split(' · ')[0]), [0, 1].map(historyButtons)];
+await finishTimers();                                       // sent
+const sent = requests('/api/reject_image');
+out.sent = sent.map(c => String(c.body.row_number)).sort();
+sent.forEach(c => answer(c, { status: 'success', approval_kept: false, candidates_left: 0, queue_status: 'pending' }));
+await flush();
+out.done = [0, 1].map(historyButtons);
+buttonOf(72, 'تراجع عن الرفض').click();                     // a one-line question, then undo-reject for that card only
+await flush();
+const undo = requests('/api/review/undo-reject');
+out.asked = asked.map(a => a.title);
+out.undo = undo.map(c => [String(c.body.row_number), c.body.image_url]);
+if (undo[0]) answer(undo[0], { status: 'success' });
+await flush();
+out.undone = [entryOf(72).textContent.includes('تراجعت'), entryOf(70).textContent.includes('تراجعت')];
+""", tmp_path, config={"mode": "bulk", "approveUndoMs": 5000})
+    assert out["held"][0] == ["رفضت Almarai Juice 1L", "رفضت Almarai Milk 1L"]
+    assert out["held"][1] == [["افتح", "تراجع"], ["افتح", "تراجع"]]
+    assert out["sent"] == ["70", "72"]
+    assert out["done"] == [["افتح", "تراجع عن الرفض"], ["افتح", "تراجع عن الرفض"]]
+    assert out["asked"] == ["ترجّع صورة «Almarai Juice 1L» للاقتراحات؟"]
+    assert out["undo"] == [["72", "https://www.carrefouruae.com/p72.jpg"]]
+    assert out["undone"] == [True, False]
+
+
+@NEEDS_NODE
+def test_undo_from_the_undo_box_marks_the_bulk_reject_line_undone(tmp_path):
+    out = page(BULK + r"""
+await flush();
+press('ArrowLeft');
+press('r');
+press('3');                                                 // quick reject of the first card: held
+await flush();
+document.querySelector('#rvUndo [data-undo]').click();      // «تراجع» in the undo box
+await flush();
+document.getElementById('rvHistoryToggle').click();
+out.items = history();
+out.buttons = historyButtons(0);
+out.stored = JSON.parse(sessionStorage.getItem('laqta.review.history')).map(e => [e.kind, e.row, e.status]);
+await finishTimers();
+out.sent = requests('/api/reject_image').length;
+""", tmp_path, config={"mode": "bulk", "approveUndoMs": 5000})
+    assert len(out["items"]) == 1 and out["items"][0].startswith("رفضت Almarai Milk 1L") and "تراجعت" in out["items"][0]
+    assert out["buttons"] == ["افتح"]
+    assert out["stored"] == [["reject", "70", "undone"]]
+    assert out["sent"] == 0

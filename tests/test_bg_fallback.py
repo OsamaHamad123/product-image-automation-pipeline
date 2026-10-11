@@ -754,7 +754,7 @@ out.text = wsText();
     assert said[0][1].startswith(f"انعزلت الخلفية بطريقة محلية لأن رصيد {name} خلص")
     assert "تم الاعتماد." in out["text"] and "عزل محلي:" in out["text"]
     assert f"لأن رصيد {name} خلص، فانعزلت بـ rembg" in out["text"]
-    assert "الخلفية لم تُعزل" not in out["text"] and "بدون عزل الخلفية" not in out["text"]
+    assert "الخلفية ما انعزلت" not in out["text"] and "بدون عزل الخلفية" not in out["text"]
 
 
 @NEEDS_NODE

@@ -197,11 +197,8 @@
                                       'aria-expanded': 'false', 'aria-controls': 'rvListBox' },
                           [el('span', { text: 'القائمة ' }), d.listCount, icon('chevron-down', 18, 2, 'rv-listtoggle__icon')]);
         // «آخر قراراتك» تحت القائمة: بالعمود الجانبي، وعالموبايل بينطوي معها جوّا «القائمة (N)»
-        d.listBox = el('div', { className: 'rv-queue__listbox', id: 'rvListBox' }, [
-            d.list,
-            buildHistory(),
-            el('div', { className: 'rv-queue__foot rv-keyhint' }, [el('span', { text: '↑ ↓ للتنقل بين المنتجات · Z لتكبير الصورة · ? للاختصارات' })])
-        ]);
+        d.listFoot = el('div', { className: 'rv-queue__foot rv-keyhint' }, [el('span', { text: '↑ ↓ للتنقل بين المنتجات · Z لتكبير الصورة · ? للاختصارات' })]);
+        d.listBox = el('div', { className: 'rv-queue__listbox', id: 'rvListBox' }, [d.list, buildHistory(), d.listFoot]);
         d.queue = el('aside', { className: 'rv-queue', 'aria-label': 'قائمة المراجعة' }, [
             d.queueHead,
             d.failed,
@@ -1297,7 +1294,7 @@
     R.announce = announce;
 
     // -------------------------------------------------------------------------------------------------
-    // «آخر قراراتك»: آخر HISTORY_MAX قرار بهالجلسة (اعتماد، رفض، رفع، تخطي) بالعمود الجانبي (وعالموبايل جوّا «القائمة
+    // «آخر قراراتك»: آخر HISTORY_MAX قرار بهالجلسة (اعتماد، رفض، رفع، تخطي؛ ووضع الجملة سطر لكل بطاقة) بالعمود الجانبي (وعالموبايل جوّا «القائمة
     // (N)»)، كل واحد بـ«افتح»، و«تراجع» لاعتماد محجوز (jobs cancel)، و«تراجع عن الرفض» لرفض انبعت (undo-reject).
     // sessionStorage (لهالجلسة بس): إعادة تحميل الصفحة ما بتمسحها. Ctrl+Z (⌘Z) بيتراجع عن آخر شي بينفع (undoLast)
     // -------------------------------------------------------------------------------------------------
@@ -1393,6 +1390,9 @@
         renderHistory();
     }
 
+    // «تراجع» عن طلب محجوز (رفض بالجملة: bulk.undoRejects): قراره بالقائمة صار «تراجعت»
+    R.decisionUndone = job => markUndone(entryOfJob(job));
+
     // undo-reject نجح (من أي مكان: الإشعار، لوحة المنتج، هون): آخر رفض لهالصورة صار «تراجعت»
     function rejectUndone(key, url) {
         markUndone((S.history || []).find(e => e.kind === 'reject' && e.key === key && e.url === url && e.status !== 'undone'));
@@ -1428,6 +1428,13 @@
             announce(`تراجعت عن رفض «${name}».`);
         }
         return done;
+    }
+
+    // «تراجع» من «آخر قراراتك»: هالقرار بس، ولو كان بطاقة من اعتماد أو رفض بالجملة (الباقي بيضل محجوز لآخر مهلته)
+    function cancelEntry(job, name) {
+        const taken = S.jobs && S.jobs.cancelJob ? S.jobs.cancelJob(job) : null;
+        if (taken) announce(`تراجعت عن «${name || taken.label}».`);
+        return !!taken;
     }
 
     function cancelHeld(group, name) {
@@ -1506,7 +1513,7 @@
                 el('span', { className: 'rv-history__actions' }, [
                     btn('open', 'افتح', () => openFromHistory(e), { 'aria-label': `افتح «${historyName(e)}»` }),
                     state === 'held' && job
-                        ? btn('undo', 'تراجع', () => cancelHeld(job.group, historyName(e)), { 'aria-label': `تراجع عن «${historyName(e)}»` }) : null,
+                        ? btn('undo', 'تراجع', () => cancelEntry(job, historyName(e)), { 'aria-label': `تراجع عن «${historyName(e)}»` }) : null,
                     canUnreject(e)
                         ? btn('unreject', 'تراجع عن الرفض', () => unrejectEntry(e), { 'aria-label': `تراجع عن رفض «${historyName(e)}»` }) : null
                 ])
@@ -1849,6 +1856,17 @@
     }
     R.chooseMode = chooseMode;
 
+    // «آخر قراراتك» نفسها بالوضعين: تحت القائمة بـ«منتج واحد»، وتحت البطاقات بـ«بالجملة» (نفس العنصر بيتنقّل)
+    function placeHistory(mode) {
+        const d = S.dom;
+        if (!d.history) return;
+        if (mode === 'bulk' && d.bulk) {
+            if (d.history.parentNode !== d.bulk) d.bulk.appendChild(d.history);
+        } else if (d.listBox && d.history.parentNode !== d.listBox) {
+            d.listBox.insertBefore(d.history, d.listFoot);
+        }
+    }
+
     function setMode(mode, opts) {
         opts = opts || {};
         if (!modeAllowed(mode)) return;
@@ -1857,6 +1875,7 @@
         d.root.setAttribute('data-mode', mode);
         d.single.hidden = mode !== 'single';
         d.bulk.hidden = mode !== 'bulk';
+        placeHistory(mode);
         if (mode === 'cutout') showCutout();
         if (d.cutout) d.cutout.hidden = mode !== 'cutout';
         d.root.querySelectorAll('.rv-modes__item').forEach(b => {

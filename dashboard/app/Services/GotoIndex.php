@@ -39,7 +39,7 @@ class GotoIndex
             ['بلا اقتراح', self::REVIEW, '/catalog?filter=none', 'no pick none', false],
             ['ما انلقت', self::REVIEW, '/catalog?filter=not_found', 'not found', false],
             ['أعطال', self::REVIEW, '/catalog?filter=failed', 'failed errors retry', false],
-            ['الخلفية لم تُعزل', self::REVIEW, '/catalog?filter=bg_failed', 'background', false],
+            ['الخلفية ما انعزلت', self::REVIEW, '/catalog?filter=bg_failed', 'background', false],
 
             ['تشغيل جديد', self::RUN, '/#run-new', 'start run new', true],
             ['التشغيل الحالي: إيقاف أو متابعة', self::RUN, '/#run-current', 'run batch stop pause resume progress', true],
