@@ -38,6 +38,8 @@ class ReviewerLimits
         'batch-automation',
         'setup',
         'api/setup/*',
+        // «فحص القص» (وضع بالمراجعة للمدير بس): المعرض وقياسه (measure=1 بيفحص لحد 24 صورة) والمعاينات كمان
+        'api/cutout/*',
     ];
 
     public const DENIED = 'هالعملية للمدير بس';

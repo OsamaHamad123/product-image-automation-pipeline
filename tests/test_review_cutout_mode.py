@@ -141,9 +141,9 @@ def test_the_old_page_redirects_and_every_link_points_at_the_mode():
     assert "route('dashboard.catalog', ['mode' => 'cutout'])" in read(DASH / "resources" / "views" / "dashboard" / "diagnostics.blade.php")
     assert not (DASH / "resources" / "views" / "dashboard" / "cutout_check.blade.php").exists()
     assert "'cutout-check'" not in read(DASH / "app" / "Http" / "Middleware" / "ReviewerLimits.php")
-    # the cutout clicks stay the owner's: every one is a POST that is not a reviewer write
+    # the cutout stays the owner's: the gallery and previews are owner pages, every click a POST no reviewer may write
     limits = read(DASH / "app" / "Http" / "Middleware" / "ReviewerLimits.php")
-    assert "api/cutout" not in limits
+    assert "'api/cutout/*'," in limits
     routes = read(DASH / "routes" / "web.php")
     for action in ("try", "apply", "discard", "undo"):
         assert f"Route::post('/api/cutout/{action}'" in routes
@@ -174,10 +174,10 @@ def test_each_role_through_the_kernel(env):
     out = kernel(environ, [
         login(REVIEWER, reviewer), ["GET", "/catalog?mode=cutout"], ["GET", "/cutout-check"],
         ["POST", "/api/cutout/try", {"id": "5", "method": "photoroom"}], ["POST", "/api/cutout/apply", {"token": "ab" * 16}],
-        ["POST", "/api/cutout/undo", {"log_id": "1"}], ["POST", "/logout"],
+        ["POST", "/api/cutout/undo", {"log_id": "1"}], ["GET", "/api/cutout/gallery?measure=1"], ["POST", "/logout"],
         login(ADMIN, admin), ["GET", "/catalog?mode=cutout"], ["GET", "/cutout-check"],
     ], body=400000)
-    as_reviewer, old_reviewer, *clicks = out[1:6]
+    as_reviewer, old_reviewer, *clicks = out[1:7]
     assert as_reviewer["status"] == 200 and DENIED not in as_reviewer["body"]
     config = _config(as_reviewer["body"])
     assert config["mode"] == "single" and config["cutout"] is None and config["urls"]["cutoutCheck"] == ""
@@ -185,7 +185,7 @@ def test_each_role_through_the_kernel(env):
     assert old_reviewer["status"] == 302 and old_reviewer["location"].endswith("/catalog?mode=cutout")
     for res in clicks:
         assert res["status"] == 403 and json.loads(res["body"]) == {"status": "error", "error": DENIED}
-    as_admin, old_admin = out[8:10]
+    as_admin, old_admin = out[9:11]
     assert as_admin["status"] == 200 and 'data-mode="cutout"' in as_admin["body"]
     config = _config(as_admin["body"])
     assert config["mode"] == "cutout" and config["cutout"]["urls"]["gallery"].endswith("/api/cutout/gallery")

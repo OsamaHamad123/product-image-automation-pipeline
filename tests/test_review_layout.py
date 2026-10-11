@@ -211,29 +211,14 @@ out.state = [document.getElementById('rvListToggle').getAttribute('aria-expanded
 # ---------------------------------------------------------------------------
 
 @NEEDS_NODE
-def test_the_cutout_check_link_lives_in_the_more_menu_for_admins(tmp_path):
+def test_the_cutout_check_is_a_mode_not_a_link_in_the_head_or_the_menu(tmp_path):
+    # «فحص القص» is the third item of the mode toggle (tests/test_review_cutout_mode.py): no second way in
     scenario = r"""
-const head = document.querySelector('.rv-queue__head');
-out.in_head = head.querySelectorAll('a').length;
-const menu = document.getElementById('rvMoreMenu');
-const link = menu.querySelector('a');
-out.link = link ? [link.getAttribute('href'), link.getAttribute('role'), link.textContent] : null;
-out.extra = document.querySelector('.rv-more__wrap').classList.contains('has-extra');
-if (link) {
-    document.getElementById('rvMore').click();
-    out.open = [menu.hidden, document.getElementById('rvMore').getAttribute('aria-expanded'),
-                document.activeElement === link, menu.querySelectorAll('button').map(b => b.hidden)];
-}
+out.in_head = document.querySelector('.rv-queue__head').querySelectorAll('a').length;
+out.in_menu = document.getElementById('rvMoreMenu').querySelectorAll('a').length;
 """
-    admin = page(scenario, tmp_path, fixture(FOUR), config={"urls": {"cutoutCheck": "/review/cutout-check"}}, before=WIDE)
-    assert admin["in_head"] == 0
-    assert admin["link"] == ["/review/cutout-check", "menuitem", "فحص القص: الصور المنشورة على الغامق والفاتح"]
-    assert admin["extra"] is True
-    # a wide screen: skip and «ما لقيت…» are on the bar, so the menu holds the link only, and it gets the focus
-    assert admin["open"] == [False, "true", True, [True, True]]
-
-    reviewer = page(scenario, tmp_path, fixture(FOUR), before=WIDE)
-    assert reviewer["in_head"] == 0 and reviewer["link"] is None and reviewer["extra"] is False
+    admin = page(scenario, tmp_path, fixture(FOUR), config={"urls": {"cutoutCheck": "/catalog?mode=cutout"}}, before=WIDE)
+    assert admin == {"in_head": 0, "in_menu": 0}
 
 
 # ---------------------------------------------------------------------------

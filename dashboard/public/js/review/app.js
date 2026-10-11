@@ -39,8 +39,6 @@
     const STACK_PX = 980;
     // آخر وضع اختاره المراجع بزر «منتج واحد | بالجملة» (localStorage، لهالمتصفح بس)
     const MODE_STORE = 'laqta.review.mode';
-    // الشاشة اللي تحتها شريط الأزرار سطر واحد و«تخطي» و«ما لقيت الصورة الصحيحة؟» بقائمة «⋯» (review.css @media (max-width: 560px))
-    const PHONE_PX = 560;
     // القائمة مفتوحة أو مسكّرة على الموبايل (sessionStorage: لهالجلسة بس). أول مرة: مسكّرة، والمنتج هو اللي بيبيّن
     const LIST_OPEN_STORE = 'laqta.review.listOpen';
     // طلبات الاعتماد اللي بتنبعت سوا: الخادم بيقفل كل منتج لحاله وقت الكتابة بالشيت (local_cache_db.sku_publish_lock)
@@ -155,18 +153,15 @@
                                    text: '⋯' });
         d.moreSkip = el('button', { type: 'button', className: 'rv-menu__item', role: 'menuitem', text: 'تخطي هالمنتج' });
         d.moreNf = el('button', { type: 'button', className: 'rv-menu__item', role: 'menuitem', text: 'ما لقيت الصورة الصحيحة؟' });
-        // «فحص القص» (للمدير بس: S.urls.cutoutCheck فاضي للمراجع): الصور المنشورة على الغامق والفاتح والمربعات
-        // (RecutController). بالقائمة بدل رأس القائمة، وعلى الشاشة العريضة هو سبب ظهور «⋯»
-        d.moreCutout = S.urls.cutoutCheck ? el('a', { className: 'rv-menu__item rv-menu__item--link', role: 'menuitem', href: S.urls.cutoutCheck,
-                                                      text: 'فحص القص: الصور المنشورة على الغامق والفاتح' }) : null;
-        d.moreMenu = el('div', { className: 'rv-menu', id: 'rvMoreMenu', role: 'menu', hidden: true }, [d.moreSkip, d.moreNf, d.moreCutout]);
+        // «فحص القص» صار وضع ثالث بزر الأوضاع (للمدير بس): ما إله رابط بالقائمة
+        d.moreMenu = el('div', { className: 'rv-menu', id: 'rvMoreMenu', role: 'menu', hidden: true }, [d.moreSkip, d.moreNf]);
         d.nextName = bdi('', 'rv-next__name');
         d.nextHint = el('span', { className: 'rv-next__hint rv-keyhint', text: 'بعد الاعتماد بننتقل تلقائياً للمنتج التالي' });
         d.bar = el('div', { className: 'lq-actionbar rv-actionbar', id: 'rvActionbar' }, [
             d.reasons,
             el('div', { className: 'rv-actionbar__row' }, [
                 d.approveBtn, d.approveNote, d.rejectBtn, d.skipBtn, d.nfBtn,
-                el('span', { className: 'rv-more__wrap' + (d.moreCutout ? ' has-extra' : '') }, [d.moreBtn, d.moreMenu]),
+                el('span', { className: 'rv-more__wrap' }, [d.moreBtn, d.moreMenu]),
                 el('span', { className: 'lq-actionbar__aside rv-next' }, [d.nextHint, d.nextName])
             ])
         ]);
@@ -293,7 +288,6 @@
             if (t && t.closest && (t.closest('#rvMoreMenu') || t.closest('#rvMore'))) return;
             toggleMoreMenu(false);
         });
-        if (d.moreCutout) d.moreCutout.addEventListener('click', () => toggleMoreMenu(false));
 
         S.listOpen = readListOpen();
         setListOpen(S.listOpen);
@@ -373,14 +367,6 @@
         else if (typeof mq.addListener === 'function') mq.addListener(onChange);
     }
 
-    function phoneBar() {
-        try {
-            return !!(root.matchMedia && root.matchMedia(`(max-width: ${PHONE_PX}px)`).matches);
-        } catch (e) {
-            return false;
-        }
-    }
-
     function focusWorkspace() {
         const ws = S.dom.wsBody;
         if (!ws || typeof ws.focus !== 'function') return;
@@ -400,15 +386,11 @@
         d.moreMenu.hidden = !want;
         d.moreBtn.setAttribute('aria-expanded', want ? 'true' : 'false');
         if (want) {
-            // عالشاشة الأعرض «تخطي» و«ما لقيت الصورة الصحيحة؟» ظاهرين بالشريط، فالقائمة فيها «فحص القص» بس
-            const wide = !phoneBar() && !!d.moreCutout;
-            d.moreSkip.hidden = wide;
-            d.moreNf.hidden = wide;
             d.moreSkip.disabled = !!d.skipBtn.disabled;
             d.moreNf.disabled = !!d.nfBtn.disabled;
             d.moreNf.textContent = d.nfBtn.getAttribute('aria-expanded') === 'true' ? 'سكّر «ما لقيت الصورة الصحيحة؟»'
                 : 'ما لقيت الصورة الصحيحة؟';
-            const first = [d.moreSkip, d.moreNf, d.moreCutout].find(b => b && !b.hidden && !b.disabled);
+            const first = [d.moreSkip, d.moreNf].find(b => b && !b.hidden && !b.disabled);
             if (first && typeof first.focus === 'function') first.focus();
         } else if (typeof d.moreBtn.focus === 'function' && d.moreMenu.contains(document.activeElement)) {
             d.moreBtn.focus();

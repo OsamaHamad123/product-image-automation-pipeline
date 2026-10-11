@@ -2375,14 +2375,10 @@
     box-shadow: var(--lq-shadow-raised);
 }
 
-/* «⋯»: on a phone «تخطي» and «ما لقيت الصورة الصحيحة؟»; for an admin, on every screen, «فحص القص» (has-extra) */
+/* «⋯»: on a phone «تخطي» and «ما لقيت الصورة الصحيحة؟» */
 .rv-more__wrap {
     position: relative;
     display: none;
-}
-
-.rv-more__wrap.has-extra {
-    display: block;
 }
 
 .lq-body .rv-more,
