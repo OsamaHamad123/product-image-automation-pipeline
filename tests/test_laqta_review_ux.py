@@ -451,7 +451,7 @@ await flush();
 out.retry = requests('/api/failures/retry').map(c => c.body.barcodes);
 """, tmp_path, fx, config={"mode": "bulk"})
     assert "اليوم: اعتمدت 87، رفضت 6، 1 ما انلقت" in out["text"]
-    assert out["links"] == ["/batch-automation#run-brands", "/batch-automation"]
+    assert out["links"] == ["/#run-brands", "/#run-new"]
     assert out["retry"] == [["ERR_Missing_Almarai"]]
 
 

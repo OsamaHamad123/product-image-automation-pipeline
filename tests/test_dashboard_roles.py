@@ -136,7 +136,7 @@ def test_a_reviewer_sees_no_admin_links(env):
     assert 'data-lq-role="reviewer"' in as_reviewer["body"]
     for link in ("/settings", "#run-current"):      # the run panel on «اليوم» (sidebar run card, «روح لـ…»)
         assert f'{link}"' not in as_reviewer["body"]
-    assert '/batch-automation"' in as_admin["body"]
+    assert '#run-current"' in as_admin["body"]                         # the sidebar run card's link to «اليوم»
     # «النظام» is in both navs (the reviewer sees its «الحالة» sections only)
     for page in (as_reviewer, as_admin):
         assert '/system"' in page["body"]

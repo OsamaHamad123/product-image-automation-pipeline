@@ -173,7 +173,7 @@ def test_the_review_screen_links_failed_approvals_to_the_check():
     failed = panel[panel.index("} else {"):panel.index("const failed = st.jobs.filter")]
     assert "j.state === 'failed' && j.type !== 'reject'" in failed       # an approval or upload, not a reject
     assert "href: S.urls.publishCheck" in failed and "text: 'افحص النشر'" in failed
-    assert "publishCheck: '/system-diagnostics#publish-check'" in app
+    assert "publishCheck: '/system?tab=publish#publish-check'" in app
     # the server's link: «أدوات» › «فحص النشر» of «النظام» (the script's default, the old address, redirects there)
     assert "'publishCheck' => url(SystemController::url('publish', [], 'publish-check'))," in read(REVIEW_PHP)
     assert ".rv-jobs__check {" in read(REVIEW_CSS)
@@ -190,7 +190,7 @@ await flush();
 out.links = document.querySelectorAll('.rv-jobs__check').map(a => [a.getAttribute('href'), a.textContent, a.tagName]);
 out.text = jobsText();
 """, tmp_path, fixture([picked(30, "Almarai Milk 1L"), picked(31, "Almarai Laban 1L")]), config={"row": 30})
-    assert out["links"] == [["/system-diagnostics#publish-check", "افحص النشر", "A"]]
+    assert out["links"] == [["/system?tab=publish#publish-check", "افحص النشر", "A"]]
     # «وحدة فشلت: أعد المحاولة» (was «خلصت: 0 مشيت، ووحدة ما مشيت»)
     assert "وحدة فشلت: أعد المحاولة" in out["text"] and "ما قدرنا ننزّل الصورة" in out["text"]
 
