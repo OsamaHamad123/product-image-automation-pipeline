@@ -130,7 +130,10 @@ def test_classes_and_tokens_exist():
            "lq-settings-advanced-title", "lq-settings-models-title", "lq-settings-sources-title", "lq-settings-speed-title", "lq-key-form", "lq-page-health", "lq-page-settings", "lq-health-spin",
            # the cards a save lands on (?tab=…#id, SettingsController::anchorFor)
            "lq-settings-speed", "lq-settings-sources", "lq-settings-advanced", "lq-settings-models",
-           "lq-settings-processing", "lq-settings-auto-publish", "lq-settings-strict-lane", "lq-key"}
+           "lq-settings-processing", "lq-settings-auto-publish", "lq-settings-strict-lane", "lq-key",
+           # the hints/notes the models controls point at (aria-describedby)
+           "lq-models-primary-help", "lq-models-strong-help", "lq-models-normalizer-help", "lq-models-budget-help",
+           "lq-models-prices-help"}
     # classes built at runtime: 'lq-tone--' + tone, 'lq-dot--' + tone, '...--' + tone
     runtime = {"lq-tone", "lq-dot", "lq-keys__state", "lq-settings-columns__item", "lq-settings-form__status",
                "lq-health-provider__problems", "lq-alert", "lq-toast", "lq-dot lq-dot", "lq-skeleton"}

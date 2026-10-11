@@ -23,7 +23,7 @@
     <div class="lq-settings-form__grid">
         <label class="lq-field">
             <span class="lq-field__label">النموذج الأساسي</span>
-            <select name="verifier_primary" class="lq-select lq-settings-field__control" @disabled((bool) $dbError)>
+            <select name="verifier_primary" class="lq-select lq-settings-field__control" {{ $fieldAttrs('verifier_primary', 'lq-models-primary-help') }} @if (!$md['primary_supported'] && !isset($fieldErrors['verifier_primary'])) aria-invalid="true" @endif @disabled((bool) $dbError)>
                 @foreach ($md['rows'] as $row)
                     <option value="{{ $row['id'] }}" @selected($md['primary'] === $row['id'])>{{ $row['label'] }} · {{ $row['per100_primary_text'] }} لكل 100 منتج</option>
                 @endforeach
@@ -31,16 +31,17 @@
                     <option value="{{ $md['primary'] }}" selected>{{ $md['primary'] }} (المضبوط حالياً)</option>
                 @endif
             </select>
+            {{ $fieldError('verifier_primary') }}
             @if (!$md['primary_supported'])
-                <span class="lq-field__error">النموذج المضبوط (<bdi dir="ltr">{{ $md['primary'] }}</bdi>) مش من القائمة المدعومة؛ اختار واحد منها واحفظ.</span>
+                <span class="lq-field__error" id="lq-models-primary-help">النموذج المضبوط (<bdi dir="ltr">{{ $md['primary'] }}</bdi>) مش من القائمة المدعومة؛ اختار واحد منها واحفظ.</span>
             @else
-                <span class="lq-field__hint">بيقرأ لحد 4 صور مرشحة بالمرة لكل منتج.</span>
+                <span class="lq-field__hint" id="lq-models-primary-help">بيقرأ لحد 4 صور مرشحة بالمرة لكل منتج.</span>
             @endif
         </label>
 
         <label class="lq-field">
             <span class="lq-field__label">النموذج القوي (النظرة التانية)</span>
-            <select name="verifier_strong" class="lq-select lq-settings-field__control" @disabled((bool) $dbError)>
+            <select name="verifier_strong" class="lq-select lq-settings-field__control" {{ $fieldAttrs('verifier_strong', 'lq-models-strong-help') }} @if (!$md['strong_supported'] && !isset($fieldErrors['verifier_strong'])) aria-invalid="true" @endif @disabled((bool) $dbError)>
                 @foreach ($md['rows'] as $row)
                     <option value="{{ $row['id'] }}" @selected(!$md['strong_off'] && $md['strong'] === $row['id'])>{{ $row['label'] }} · {{ $row['per100_strong_text'] }} لكل 100 منتج</option>
                 @endforeach
@@ -49,31 +50,34 @@
                 @endif
                 <option value="off" @selected($md['strong_off'])>إيقاف النموذج القوي (بلا نظرة تانية)</option>
             </select>
+            {{ $fieldError('verifier_strong') }}
             @if (!$md['strong_supported'])
-                <span class="lq-field__error">النموذج المضبوط (<bdi dir="ltr">{{ $md['strong'] }}</bdi>) مش من القائمة المدعومة؛ اختار واحد منها أو أوقفه واحفظ.</span>
+                <span class="lq-field__error" id="lq-models-strong-help">النموذج المضبوط (<bdi dir="ltr">{{ $md['strong'] }}</bdi>) مش من القائمة المدعومة؛ اختار واحد منها أو أوقفه واحفظ.</span>
             @else
-                <span class="lq-field__hint">بيقرأ صورة وحدة بس، لما الأساسي ما يقدر يقرأ الماركة أو الحجم أو النوع. السعر جنب كل نموذج حد أعلى.</span>
+                <span class="lq-field__hint" id="lq-models-strong-help">بيقرأ صورة وحدة بس، لما الأساسي ما يقدر يقرأ الماركة أو الحجم أو النوع. السعر جنب كل نموذج حد أعلى.</span>
             @endif
         </label>
     </div>
 
     <label class="lq-field">
         <span class="lq-field__label">قراءة أسماء الشيت المختصرة</span>
-        <select name="query_normalizer" class="lq-select lq-settings-field__control" @disabled((bool) $dbError)>
+        <select name="query_normalizer" class="lq-select lq-settings-field__control" {{ $fieldAttrs('query_normalizer', 'lq-models-normalizer-help') }} @disabled((bool) $dbError)>
             <option value="gemini" @selected($md['normalizer_on'])>شغّالة · Gemini 3.1 Flash-Lite · حوالي {{ $md['normalizer_per100_text'] }} لكل 100 منتج</option>
             <option value="off" @selected(!$md['normalizer_on'])>موقّفة (البحث بكلمات الشيت بس)</option>
         </select>
+        {{ $fieldError('query_normalizer') }}
         @if ($md['normalizer_on'] && !$md['normalizer_key_saved'])
-            <span class="lq-field__error">بتحتاج مفتاح Gemini وهو مش محفوظ: ضيفه من «المفاتيح». لحد ما تضيفه، البحث بيكمل بكلمات الشيت بس.</span>
+            <span class="lq-field__error" id="lq-models-normalizer-help">بتحتاج مفتاح Gemini وهو مش محفوظ: ضيفه من «المفاتيح». لحد ما تضيفه، البحث بيكمل بكلمات الشيت بس.</span>
         @else
-            <span class="lq-field__hint">بتفك اختصارات أسماء الشيت (مثلاً LGT بتصير Light) لتكتب كلمات بحث أوضح، مرة وحدة لكل منتج وبتنحفظ. ما بتقرر شي: الصورة بتنقبل بس إذا طابقت اسم الشيت نفسه. وإذا ما لقينا الماركة وجربنا الماركة اللي خمّنتها، الصورة اللي بتطلع بتستنى مراجعتك دايماً.</span>
+            <span class="lq-field__hint" id="lq-models-normalizer-help">بتفك اختصارات أسماء الشيت (مثلاً LGT بتصير Light) لتكتب كلمات بحث أوضح، مرة وحدة لكل منتج وبتنحفظ. ما بتقرر شي: الصورة بتنقبل بس إذا طابقت اسم الشيت نفسه. وإذا ما لقينا الماركة وجربنا الماركة اللي خمّنتها، الصورة اللي بتطلع بتستنى مراجعتك دايماً.</span>
         @endif
     </label>
 
     <label class="lq-field">
         <span class="lq-field__label">الميزانية الشهرية للنموذج القوي (دولار)</span>
-        <input type="number" class="lq-input lq-settings-field__control lq-models__budget" name="verifier_monthly_budget_usd" min="0" max="{{ \App\Http\Controllers\SettingsController::VERIFIER_BUDGET_MAX }}" step="0.01" value="{{ $md['budget'] }}" dir="ltr" inputmode="decimal" @disabled((bool) $dbError)>
-        <span class="lq-field__hint">لما تخلص، المنتجات المش مؤكدة بتستنى مراجعتك بدون نظرة تانية لأول الشهر الجاي. 0 يعني بلا نظرة تانية.</span>
+        <input type="number" class="lq-input lq-settings-field__control lq-models__budget" name="verifier_monthly_budget_usd" min="0" max="{{ \App\Http\Controllers\SettingsController::VERIFIER_BUDGET_MAX }}" step="0.01" value="{{ $md['budget'] }}" dir="ltr" inputmode="decimal" {{ $fieldAttrs('verifier_monthly_budget_usd', 'lq-models-budget-help') }} @disabled((bool) $dbError)>
+        {{ $fieldError('verifier_monthly_budget_usd') }}
+        <span class="lq-field__hint" id="lq-models-budget-help">لما تخلص، المنتجات المش مؤكدة بتستنى مراجعتك بدون نظرة تانية لأول الشهر الجاي. 0 يعني بلا نظرة تانية.</span>
     </label>
     @if ($md['spend'] === null)
         <p class="lq-settings-card__note">ما قدرنا نقرأ صرف هالشهر من قاعدة البيانات.</p>
@@ -90,7 +94,7 @@
 
     <fieldset class="lq-settings-fieldset lq-settings-fieldset--boxed" @disabled((bool) $dbError)>
         <legend class="lq-field__label">الأسعار (دولار لكل مليون token)</legend>
-        <span class="lq-field__hint">أسعار تقديرية بتنحسب فيها التكلفة والميزانية. عدّلها إذا تغيّرت أسعار خطتك. «لكل 100 منتج» تقدير: الأساسي قراءة وحدة لكل منتج، والقوي نظرة تانية لكل منتج (حد أعلى، لأنه ما بيشتغل إلا لما الأساسي مش متأكد).</span>
+        <span class="lq-field__hint" id="lq-models-prices-help">أسعار تقديرية بتنحسب فيها التكلفة والميزانية. عدّلها إذا تغيّرت أسعار خطتك. «لكل 100 منتج» تقدير: الأساسي قراءة وحدة لكل منتج، والقوي نظرة تانية لكل منتج (حد أعلى، لأنه ما بيشتغل إلا لما الأساسي مش متأكد).</span>
         <div class="lq-table-wrap lq-models__table">
             <table class="lq-table">
                 <thead>
@@ -112,10 +116,10 @@
                                 @endif
                             </td>
                             <td data-label="الإدخال">
-                                <input type="number" class="lq-input lq-input--sm lq-models__price" name="price_input[{{ $row['slug'] }}]" value="{{ $row['input'] }}" min="0" max="{{ \App\Http\Controllers\SettingsController::VERIFIER_PRICE_MAX }}" step="0.01" dir="ltr" inputmode="decimal" aria-label="سعر الإدخال لـ {{ $row['label'] }}">
+                                <input type="number" class="lq-input lq-input--sm lq-models__price" name="price_input[{{ $row['slug'] }}]" value="{{ $row['input'] }}" min="0" max="{{ \App\Http\Controllers\SettingsController::VERIFIER_PRICE_MAX }}" step="0.01" dir="ltr" inputmode="decimal" aria-label="سعر الإدخال لـ {{ $row['label'] }}" {{ $fieldAttrs('price_input.' . $row['slug'], 'lq-models-prices-help', 'model_prices') }}>
                             </td>
                             <td data-label="الإخراج">
-                                <input type="number" class="lq-input lq-input--sm lq-models__price" name="price_output[{{ $row['slug'] }}]" value="{{ $row['output'] }}" min="0" max="{{ \App\Http\Controllers\SettingsController::VERIFIER_PRICE_MAX }}" step="0.01" dir="ltr" inputmode="decimal" aria-label="سعر الإخراج لـ {{ $row['label'] }}">
+                                <input type="number" class="lq-input lq-input--sm lq-models__price" name="price_output[{{ $row['slug'] }}]" value="{{ $row['output'] }}" min="0" max="{{ \App\Http\Controllers\SettingsController::VERIFIER_PRICE_MAX }}" step="0.01" dir="ltr" inputmode="decimal" aria-label="سعر الإخراج لـ {{ $row['label'] }}" {{ $fieldAttrs('price_output.' . $row['slug'], 'lq-models-prices-help', 'model_prices') }}>
                             </td>
                             <td class="lq-table__num" data-label="أساسي"><bdi dir="ltr">{{ $row['per100_primary_text'] }}</bdi></td>
                             <td class="lq-table__num" data-label="قوي"><bdi dir="ltr">{{ $row['per100_strong_text'] }}</bdi></td>
@@ -124,6 +128,7 @@
                 </tbody>
             </table>
         </div>
+        {{ $fieldError('model_prices') }}
     </fieldset>
 
     <p class="lq-settings-card__note">نماذج Claude بتحتاج مفتاح Anthropic، ونماذج Gemini مفتاح Gemini: ضيفهم من تبويب <a class="lq-link" href="{{ route('dashboard.settings') }}?tab=keys">المفاتيح</a>. التكلفة الفعلية لكل نموذج بصفحة <a class="lq-link" href="{{ route('dashboard.diagnostics') }}">الصحة والتكلفة</a>.</p>

@@ -2177,6 +2177,7 @@ a.lq-btn[aria-disabled="true"] {
         overflow: visible;
     }
 
+    .lq-sidebar .lq-goto-open,
     .lq-sidebar .lq-brand,
     .lq-sidebar__spacer,
     .lq-sidebar__user,
@@ -2289,6 +2290,7 @@ a.lq-btn[aria-disabled="true"] {
         white-space: nowrap;
     }
 
+    .lq-account-sheet__goto,
     .lq-account-sheet__logout {
         margin-top: var(--lq-space-2);
     }
@@ -2346,6 +2348,217 @@ a.lq-btn[aria-disabled="true"] {
     .lq-check-row--boxed {
         grid-template-columns: 56px minmax(0, 1fr) minmax(0, 1fr) 24px;
         gap: var(--lq-space-2);
+    }
+}
+
+/* «روح على» (components/lq/jump-links): in-page links to the cards of a long page */
+.lq-jump {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: var(--lq-space-2);
+}
+
+.lq-jump__label {
+    color: var(--lq-text-3);
+    font-size: 13px;
+}
+
+.lq-jump__list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--lq-space-2);
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.lq-jump__link {
+    display: inline-flex;
+    align-items: center;
+    min-height: 32px;
+    padding-inline: 12px;
+    border: 1px solid var(--lq-border);
+    border-radius: var(--lq-radius-pill);
+    background: var(--lq-surface);
+    color: var(--lq-text-2);
+    font-size: 13px;
+    font-weight: 500;
+    text-decoration: none;
+}
+
+.lq-jump__link:hover {
+    border-color: var(--lq-teal-300);
+    background: var(--lq-teal-soft);
+    color: var(--lq-teal-900);
+}
+
+/* a card reached by its #id does not land under the page's top edge */
+.lq-main [id] {
+    scroll-margin-block-start: var(--lq-space-4);
+}
+
+/* «روح لـ…» (public/js/jump.js): one box from any page to any page, card, setting or product */
+.lq-goto-open {
+    display: flex;
+    align-items: center;
+    gap: var(--lq-space-2);
+    width: 100%;
+    min-height: 40px;
+    margin-block-end: var(--lq-space-3);
+    padding-inline: 12px;
+    border: 1px solid var(--lq-ink-700);
+    border-radius: var(--lq-radius-md);
+    background: var(--lq-ink-800);
+    color: var(--lq-ink-text);
+    font: inherit;
+    font-size: 14px;
+    cursor: pointer;
+}
+
+.lq-goto-open:hover {
+    color: var(--lq-ink-fg);
+    border-color: var(--lq-ink-muted);
+}
+
+.lq-goto-open__label {
+    flex: 1;
+    text-align: start;
+}
+
+.lq-goto-open kbd,
+.lq-goto__hint kbd {
+    padding: 1px 6px;
+    border: 1px solid currentColor;
+    border-radius: 5px;
+    font-family: var(--lq-font-mono);
+    font-size: 11px;
+    opacity: 0.8;
+}
+
+.lq-goto-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 90;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding: 12vh var(--lq-space-4) var(--lq-space-4);
+    background: rgba(11, 34, 38, 0.45);
+}
+
+.lq-goto {
+    display: flex;
+    flex-direction: column;
+    width: min(620px, 100%);
+    max-height: 70vh;
+    overflow: hidden;
+    border-radius: var(--lq-radius-xl);
+    background: var(--lq-surface);
+    box-shadow: 0 24px 60px rgba(11, 34, 38, 0.28);
+}
+
+.lq-goto__field {
+    display: flex;
+    align-items: center;
+    gap: var(--lq-space-2);
+    padding: var(--lq-space-3) var(--lq-space-4);
+    border-block-end: 1px solid var(--lq-border-soft);
+    color: var(--lq-text-3);
+}
+
+.lq-goto__input {
+    flex: 1;
+    min-width: 0;
+    min-height: 40px;
+    border: 0;
+    outline: none;
+    background: transparent;
+    color: var(--lq-text);
+    font: inherit;
+    font-size: 16px;
+}
+
+.lq-goto__list {
+    flex: 1;
+    margin: 0;
+    padding: var(--lq-space-2);
+    overflow-y: auto;
+    list-style: none;
+}
+
+.lq-goto__options {
+    margin: 0;
+    padding: 0;
+    list-style: none;
+}
+
+.lq-goto__group {
+    display: block;
+    padding: var(--lq-space-2) var(--lq-space-3) var(--lq-space-1);
+    color: var(--lq-text-3);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.lq-goto__item {
+    display: flex;
+    align-items: center;
+    gap: var(--lq-space-3);
+    min-height: 44px;
+    padding: var(--lq-space-2) var(--lq-space-3);
+    border-radius: var(--lq-radius-md);
+    color: var(--lq-text);
+    cursor: pointer;
+}
+
+.lq-goto__item[aria-selected="true"] {
+    background: var(--lq-teal-soft);
+    color: var(--lq-teal-900);
+}
+
+.lq-goto__title {
+    flex: 1;
+    min-width: 0;
+}
+
+.lq-goto__where {
+    color: var(--lq-text-3);
+    font-size: 12px;
+}
+
+.lq-goto__empty {
+    padding: var(--lq-space-4);
+    color: var(--lq-text-3);
+    text-align: center;
+}
+
+.lq-goto__hint {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--lq-space-3);
+    padding: var(--lq-space-2) var(--lq-space-4);
+    border-block-start: 1px solid var(--lq-border-soft);
+    color: var(--lq-text-3);
+    font-size: 12px;
+}
+
+/* touch screens: every button and pill is at least 44px tall (the small buttons are 36px for the mouse) */
+@media (pointer: coarse) {
+    .lq-body .lq-btn--sm {
+        min-height: 44px;
+    }
+
+    .lq-body .lq-btn--icon.lq-btn--sm {
+        min-width: 44px;
+    }
+
+    .lq-body .lq-jump__link {
+        min-height: 44px;
+    }
+
+    .lq-goto__hint {
+        display: none;
     }
 }
 

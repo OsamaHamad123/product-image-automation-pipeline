@@ -161,6 +161,7 @@
         const S = st();
         opts = opts || {};
         if (!S.byKey.get(key)) return;
+        const moved = S.openKey !== key;
         // فتح المنتج (أو فتحه من جديد) = ما يراه المراجع الآن: لقطة expected_state جديدة (C1). تغيّر بعد فتحه: يُعرض
         // كما هو الآن (resetMoved يعيد بناء القائمة، فيُقرأ العنصر بعده)
         if (S.moved.has(key)) resetMoved(S.byKey.get(key));
@@ -179,8 +180,19 @@
         if (R.ensureListed(key)) R.renderList();
         renderWorkspace();
         R.markActive();
+        if (moved && ANNOUNCE_FROM.includes(opts.from)) announceOpened(item, opts.back);
         if (!opts.noUrl) R.updateUrl(false);
         maybeAutoSearch(item);
+    }
+
+    // انتقال بلا ضغطة عالقائمة (بعد اعتماد أو رفض أو تخطي، أو ↑ ↓): قارئ الشاشة ما بيعرف إن منتج ثاني انفتح، فبنحكيله
+    // اسمه وصفّه بالمنطقة المؤدبة (R.announce). التركيز ما بيتحرك: بيضل عشريط الأزرار
+    const ANNOUNCE_FROM = ['approve', 'reject', 'skip', 'keys'];
+
+    function announceOpened(item, back) {
+        if (typeof R.announce !== 'function') return;
+        const p = item.product;
+        R.announce(`${back ? 'المنتج اللي قبل' : 'المنتج الجاي'}: ${p.product_name || p.product_name_ar || 'بلا اسم'} (صف ${p.row_number})`);
     }
 
     // منتج لم يُبحث له أبداً (لا مرشحات، لا صورة نهائية، لا عطل): بحث تلقائي بعد مهلة قصيرة، والتنقل السريع لا يطلقه.
@@ -773,15 +785,29 @@
         S.reasonsOpen = true;
         renderReasons();
         updateBar();
+        // التركيز لأول سبب: Tab و Enter بيمشوا جوّا الأسباب (و 1–9 متل قبل)، و Esc بيرجّعه لزر «رفض»
+        const first = S.dom.reasons && S.dom.reasons.querySelector('.rv-reason');
+        if (first && typeof first.focus === 'function') first.focus();
     }
 
-    function closeReasons(silent) {
+    // restore: انسكّرت بـ Esc أو «إلغاء»: التركيز بيرجع لزر «رفض». انسكّرت لأنه اختار سبب والتركيز كان جوّاها: لمساحة
+    // العمل (متل بعد ضغطة عالقائمة)، فـ Enter بعدها بيعتمد الصورة الظاهرة، وما بيضيع عـ body ولا بيفتح الأسباب من جديد
+    function closeReasons(silent, restore) {
         const S = st();
         if (!S.reasonsOpen) return;
+        const d = S.dom;
+        const inside = !!(d.reasons && document.activeElement && d.reasons.contains(document.activeElement));
         S.reasonsOpen = false;
         if (!silent) {
             renderReasons();
             updateBar();
+        }
+        const target = restore ? d.rejectBtn : (inside ? d.wsBody : null);
+        if (!target || typeof target.focus !== 'function') return;
+        try {
+            target.focus({ preventScroll: true });
+        } catch (e) {
+            target.focus();
         }
     }
 
@@ -1043,7 +1069,7 @@ ${candidate.url}` : item.key, productKey: item.key, stay: stay,
                 el('span', { className: 'rv-alts__hint', text: 'رفضت وحدة بالغلط أو للتجربة؟ رجّعها للاقتراحات.' })
             ]),
             el('div', { className: 'rv-rejected__grid' }, list.map(r => el('div', { className: 'rv-rejected__item', dataset: { url: r.url } }, [
-                el('span', { className: 'rv-rejected__thumb' }, [R.img(r.url, '', S.urls.imageProxy)]),
+                el('span', { className: 'rv-rejected__thumb' }, [R.img(r.url, `صورة رفضتها من ${R.storeOf(r).store}`, S.urls.imageProxy)]),
                 el('span', { className: 'rv-alt__note rv-tone--danger', text: r.reason_code ? `مرفوضة: ${R.reasonLabel(r.reason_code)}` : 'مرفوضة' }),
                 el('button', { type: 'button', className: 'lq-btn lq-btn--secondary lq-btn--sm', dataset: { undoReject: r.url },
                                disabled: !!sess.undoing, text: sess.undoing === r.url ? 'عم نرجّعها…' : R.UNDO_REJECT_LABEL,
@@ -1065,7 +1091,7 @@ ${candidate.url}` : item.key, productKey: item.key, stay: stay,
         let idx = list.findIndex(it => it.key === S.openKey);
         if (idx < 0) idx = delta > 0 ? -1 : list.length;
         const next = list[idx + delta];
-        if (next) openItem(next.key, { from: 'keys' });
+        if (next) openItem(next.key, { from: 'keys', back: delta < 0 });
     }
 
     function toggleNotFound() {
@@ -1076,7 +1102,7 @@ ${candidate.url}` : item.key, productKey: item.key, stay: stay,
         renderWorkspace();
         if (sess.nfOpen) {
             const panel = document.getElementById('rvNotFound');
-            if (panel && typeof panel.scrollIntoView === 'function') panel.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+            R.scrollIntoView(panel, { block: 'nearest', behavior: 'smooth' });
         }
     }
 
@@ -1124,12 +1150,28 @@ ${candidate.url}` : item.key, productKey: item.key, stay: stay,
         renderWorkspace();
     }
 
-    async function retryFailures(items) {
+    // صفوف «رجّع وشغّل» لرابط صفحة التشغيل: 5,6,7,9 بتصير 5-7,9
+    function rowsText(items) {
+        const rows = [...new Set(items.map(it => parseInt(it.product.row_number, 10)).filter(n => n > 0))].sort((a, b) => a - b);
+        const parts = [];
+        for (let i = 0; i < rows.length; i++) {
+            let j = i;
+            while (j + 1 < rows.length && rows[j + 1] === rows[j] + 1) j++;
+            parts.push(j > i ? `${rows[i]}-${rows[j]}` : String(rows[i]));
+            i = j;
+        }
+        return parts.join(',');
+    }
+
+    // opts.thenRun: بعد ما ترجع للطابور، صفحة التشغيل بتنفتح على هالصفوف بس (التقدير قدامك، و«ابدأ» كبسة وحدة).
+    // ما في سؤال قبلها: زر «ابدأ» هناك هو التأكيد، والطابور لحاله ما بيصرف شي
+    async function retryFailures(items, opts) {
         const S = st();
         items = (items || []).filter(it => it && it.product && !it.orphan);
         if (!items.length) return;
         const n = items.length;
-        if (n > 1 && !(await R.ask({ title: `رح نرجّع ${R.plural(n, 'منتج واحد', 'منتجات')} للطابور؟`,
+        const thenRun = !!(opts && opts.thenRun && S.urls.run);
+        if (n > 1 && !thenRun && !(await R.ask({ title: `رح نرجّع ${R.plural(n, 'منتج واحد', 'منتجات')} للطابور؟`,
                                      text: 'بنشيلها من الأعطال. ما رح يبلش أي تشغيل من هون: بتنعالج لما تشغّل التشغيل. الصور المعتمدة ما بتنلمس.',
                                      confirmText: 'رجّعها للطابور' }))) {
             return;
@@ -1142,6 +1184,10 @@ ${candidate.url}` : item.key, productKey: item.key, stay: stay,
                 R.settleSeen(it.key, null);      // إجراء المراجع نفسه: القراءة التالية لا تُعد «تغيّر بعد فتحه»
             });
             const done = parseInt(data.requeued, 10) || n;
+            if (thenRun) {
+                R.navigate(`${S.urls.run}?scope=rows&rows=${encodeURIComponent(rowsText(items))}`);
+                return;
+            }
             let msg = `رجعت ${R.plural(done, 'منتج واحد', 'منتجات')} للطابور. ما بتبلش معالجتها لحالها: شغّل التشغيل من صفحة «التشغيل».`;
             if (parseInt(data.not_found, 10) > 0) msg += ` ${data.not_found} ما لقيناها بالشيت فبقيت بالأعطال.`;
             R.toast(msg, 'success', 9000);
@@ -1365,7 +1411,10 @@ ${candidate.url}` : item.key, productKey: item.key, stay: stay,
                 renderWorkspace();
             }
         }, [
-            el('span', { className: 'rv-alt__thumb' }, [R.img(c.url, '', S.urls.imageProxy), i < 9 ? el('span', { className: 'rv-alt__num', text: String(i + 1) }) : null]),
+            // اسم الزر لقارئ الشاشة بيبلّش بـ alt الصورة («صورة مقترحة 3»، ورقمها هو اختصارها 1–9)، وبعده المتجر والملاحظات.
+            // الرقم الظاهر فوق الصورة مكرر فيه، فمخفي عن قارئ الشاشة
+            el('span', { className: 'rv-alt__thumb' }, [R.img(c.url, `صورة مقترحة ${i + 1}`, S.urls.imageProxy),
+                i < 9 ? el('span', { className: 'rv-alt__num', 'aria-hidden': 'true', text: String(i + 1) }) : null]),
             el('span', { className: 'rv-alt__store', text: isExtra(c) ? note.text : [where.store, where.market].filter(Boolean).join(' · ') }),
             R.galleryNote(c) ? el('span', { className: 'rv-gallery', text: R.galleryNote(c) }) : null,
             showNote ? el('span', { className: `rv-alt__note rv-tone--${note.tone}`, text: note.text }) : null,
@@ -1820,7 +1869,7 @@ ${candidate.url}` : item.key, productKey: item.key, stay: stay,
             onclick: () => rejectCurrent(r.code)
         }, [i < 9 ? el('span', { className: 'rv-reason__n', text: String(i + 1) }) : null, el('span', { text: r.label })])));
         box.appendChild(el('label', { className: 'lq-check rv-reasons__research' }, [S.dom.researchBox, el('span', { text: 'دوّر على بدائل بعد الرفض' })]));
-        box.appendChild(el('button', { type: 'button', className: 'lq-btn lq-btn--ghost lq-btn--sm', onclick: () => closeReasons() },
+        box.appendChild(el('button', { type: 'button', className: 'lq-btn lq-btn--ghost lq-btn--sm', onclick: () => closeReasons(false, true) },
                            [el('span', { text: 'إلغاء' }), R.kbd('Esc')]));
         // ما يفعله الرفض وما يبقيه (cli_bridge.action_reject_image، عقد C2): السبب يُسجل والصورة لا تُقترح لهالمنتج مرة
         // ثانية؛ إذا بقي له صور ثانية يبقى بانتظار المراجعة فيها، وإلا يرجع للطابور؛ والصورة المعتمدة غيرها تبقى كما هي

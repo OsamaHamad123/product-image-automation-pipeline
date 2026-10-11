@@ -1022,3 +1022,8 @@
         max-height: 260px;
     }
 }
+
+/* «روح على»: links to the cards inside «تفاصيل متقدمة» (health.js opens it) */
+.lq-health__jump {
+    margin-block: calc(-1 * var(--lq-space-1)) var(--lq-space-1);
+}

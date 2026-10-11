@@ -510,9 +510,11 @@ def test_confirm_texts_say_exactly_what_happens():
     run_js, batch, index = read(JS / "run.js"), read(BATCH), read(INDEX)
     stop = run_js[run_js.index("var STOP_CONFIRM_TEXT"):]
     stop = stop[:stop.index(";\n")]
-    # plain Levantine: what keeps going, what comes back, and that nothing is deleted
+    # plain Levantine, a short question: what comes back, and that nothing is deleted or touched when published
+    assert "title: 'نوقف التشغيل؟'" in stop and "danger: true" in stop
     assert "الصفوف اللي كانت عم تتعالج بترجع تستنى" in stop
-    assert "ما في ولا صف بينمسح" in stop
+    assert "ما في ولا صف بينمسح" in stop and "المنشور ما بينلمس" in stop
+    assert "•" not in stop
     for text in (run_js, batch, index, read(JS / "home.js")):
         assert "إنهاء قسري" not in text
     reset = run_js[run_js.index("var RESET_CONFIRM_TEXT"):]

@@ -64,6 +64,9 @@ class ReviewController extends Controller
         // ?reason=no_size: قائمة «بلا اقتراح» لسبب واحد (رمز السبب كما يكتبه catalog_match.explain)
         $reasonParam = $request->query('reason', '');
         $reason = is_string($reasonParam) && preg_match('/^[a-z_]{1,40}$/', $reasonParam) ? $reasonParam : null;
+        // ?q=: بحث القائمة جاهز (من «روح لـ…» بأي صفحة): اسم أو ماركة أو باركود أو SKU، نص بس وبطول معقول
+        $qParam = $request->query('q', '');
+        $q = is_string($qParam) ? mb_substr(trim($qParam), 0, 100) : '';
 
         $dbOnline = self::databaseOnline();
         $readyForReview = $dbOnline ? self::readyForReview() : null;
@@ -72,10 +75,11 @@ class ReviewController extends Controller
             'mode' => $mode,
             // ?mode= أو ?row= بالرابط: الوضع محدد. بدونهم الصفحة بتختار (آخر وضع اختاره المراجع، أو «بالجملة» لما يكون
             // في 10 صور مقترحة بلا تحذير أو أكثر)
-            'modeExplicit' => in_array($request->query('mode'), self::MODES, true) || $row !== null,
+            'modeExplicit' => in_array($request->query('mode'), self::MODES, true) || $row !== null || $q !== '',
             'filter' => $filter,
             'row' => $row,
             'reason' => $reason,
+            'q' => $q,
             'canvas' => $dbOnline ? self::canvasSize() : self::envCanvasSize(),
             'db' => $dbOnline ? 'online' : 'offline',
             'readyForReview' => $readyForReview,

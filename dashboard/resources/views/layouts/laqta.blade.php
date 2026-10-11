@@ -78,6 +78,13 @@
                     </span>
                 </a>
 
+                {{-- «روح لـ…» (jump.js): أي صفحة أو كرت أو إعداد أو منتج بكبسة، من غير صفحات زيادة --}}
+                <button type="button" class="lq-goto-open" data-lq-goto-open aria-keyshortcuts="Control+K /">
+                    <x-lq.icon name="search" :size="16" />
+                    <span class="lq-goto-open__label">روح لـ…</span>
+                    <kbd dir="ltr">Ctrl K</kbd>
+                </button>
+
                 <nav class="lq-nav" aria-label="التنقل الرئيسي">
                     @foreach ($lqNavItems as $lqItem)
                         <a href="{{ route($lqItem['route']) }}" @class(['lq-nav__item', 'is-active' => $lqActive === $lqItem['key']]) @if ($lqActive === $lqItem['key']) aria-current="page" @endif>
@@ -117,11 +124,13 @@
         </aside>
 
         @auth
-            {{-- قائمة «حسابي» (الموبايل): «خروج» بيبعت نموذج الخروج اللي فوق (form=، POST مع CSRF) حتى وهو مخفي --}}
-            <div class="lq-account-sheet" id="lq-account-sheet" role="dialog" aria-label="حسابي" data-lq-account-sheet hidden>
+            {{-- قائمة «حسابي» (الموبايل): «خروج» بيبعت نموذج الخروج اللي فوق (form=، POST مع CSRF) حتى وهو مخفي.
+                 aria-modal: layout.js بيلف Tab بين زرّيها وEsc بيرجّع لزر «حسابي»؛ وهي مسكّرة (hidden) jump.js ما بيحسبها --}}
+            <div class="lq-account-sheet" id="lq-account-sheet" role="dialog" aria-modal="true" aria-label="حسابي" data-lq-account-sheet hidden>
                 <span class="lq-account-sheet__label">داخل باسم</span>
                 <span class="lq-account-sheet__name" dir="ltr">{{ auth()->user()->name }}</span>
                 <span class="lq-account-sheet__role">{{ $lqReviewer ? 'مراجع' : 'مدير' }}</span>
+                <button class="lq-btn lq-btn--secondary lq-account-sheet__goto" type="button" data-lq-goto-open>روح لـ… (صفحة، إعداد، أو منتج)</button>
                 <button class="lq-btn lq-btn--secondary lq-account-sheet__logout" type="submit" form="lqLogoutForm">خروج</button>
             </div>
         @endauth
@@ -133,7 +142,9 @@
 
     <div class="lq-toast-region" data-lq-toasts role="status" aria-live="polite"></div>
 
+    <script type="application/json" id="lqGotoIndex">@json(\App\Services\GotoIndex::entries($lqReviewer))</script>
     <script src="{{ asset('js/layout.js') }}?v={{ @filemtime(public_path('js/layout.js')) ?: '1' }}"></script>
+    <script src="{{ asset('js/jump.js') }}?v={{ @filemtime(public_path('js/jump.js')) ?: '1' }}"></script>
     @yield('scripts')
     @stack('scripts')
 </body>

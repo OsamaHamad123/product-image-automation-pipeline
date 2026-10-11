@@ -78,7 +78,7 @@
         listLimit: LIST_PAGE,
         // bulk: selected / seen / loaded / failed / inView / unticked hold '<key>\n<pick url>' (a tick belongs to the picture).
         // The status filter is S.filter, shared with single mode (a mode switch keeps it)
-        bulk: { brand: '', selected: new Set(), limit: 48, seeded: false, focus: null, autoTick: true,
+        bulk: { brand: '', query: '', selected: new Set(), limit: 48, seeded: false, focus: null, autoTick: true,
                 unticked: new Set(), seen: new Set(), loaded: new Set(), failed: new Set(), inView: new Set(), advancedAt: 0,
                 everSeen: new Set(), anchor: null, startedAt: 0, reviewed: new Set() },
         // the mode came from the URL (?mode=) or the reviewer's own toggle: no automatic choice over it
@@ -177,7 +177,7 @@
         d.queue = el('aside', { className: 'rv-queue', 'aria-label': 'قائمة المراجعة' }, [
             el('div', { className: 'rv-queue__head' }, [
                 el('div', { className: 'rv-queue__title' }, [
-                    el('h1', { className: 'rv-queue__h1', text: 'قائمة المراجعة' }), d.waiting, d.refreshBtn
+                    el('h1', { className: 'rv-queue__h1', text: 'قائمة المراجعة' }), d.waiting, d.refreshBtn, keysButton()
                 ]),
                 modeToggle('single'),
                 el('label', { className: 'lq-search rv-search' }, [icon('search', 18), el('span', { className: 'lq-sr-only', text: 'بحث بالقائمة' }), d.search]),
@@ -200,11 +200,14 @@
         d.undo = el('div', { className: 'rv-undo', id: 'rvUndo', role: 'status', 'aria-live': 'polite', hidden: true });
         d.float = el('div', { className: 'rv-float' }, [d.undo, d.jobs]);
         d.dialog = el('div', { className: 'rv-dialog-backdrop', id: 'rvDialog', hidden: true });
+        // قارئ الشاشة: أي منتج انفتح بعد الانتقال التلقائي أو ↑ ↓ (announce). بس بيحكي، والتركيز بيضل عشريط الأزرار
+        d.announce = el('div', { className: 'lq-sr-only', id: 'rvAnnounce', role: 'status', 'aria-live': 'polite', 'aria-atomic': 'true' });
 
         rootEl.appendChild(d.single);
         rootEl.appendChild(d.bulk);
         rootEl.appendChild(d.float);
         rootEl.appendChild(d.dialog);
+        rootEl.appendChild(d.announce);
 
         d.list.addEventListener('click', e => {
             const btn = e.target && e.target.closest ? e.target.closest('[data-key]') : null;
@@ -391,8 +394,9 @@
 
     // -------------------------------------------------------------------------------------------------
     // «اعتمادات ما زبطت»: اعتمادات فشلت عالخادم بآخر 24 ساعة وما حدا تجاهلها (GET approval-jobs?failed=1)، غالباً بعد
-    // ما طلع المراجع من الصفحة. لكل وحدة: اسم المنتج والسبب بالعربي، «افتح المنتج» (بيفتحه بوضع «منتج واحد» بحالته
-    // هلق، فبيعتمده من جديد) و«تجاهل». بتنقرا وقت تفتح الصفحة، ولما عدّاد الشريط الجانبي (failed_open) يتغيّر.
+    // ما طلع المراجع من الصفحة. لكل وحدة: اسم المنتج والسبب بالعربي، «أعد المحاولة» (نفس الاعتماد بينبعت من جديد من
+    // هون، بلا ما ينفتح المنتج)، «افتح المنتج» (بيفتحه بوضع «منتج واحد» بحالته هلق) و«تجاهل». بتنقرا وقت تفتح الصفحة،
+    // ولما عدّاد الشريط الجانبي (failed_open) يتغيّر.
     // اعتمادات هالصفحة نفسها ما بتنعاد هون: لوحة الاعتمادات بتعرضها مع زر إعادتها
     // -------------------------------------------------------------------------------------------------
 
@@ -437,22 +441,84 @@
         return R.plainError(job.error, R.plainError(job.error_code, 'ما انعتمدت، والخادم ما قال ليش.'));
     }
 
+    const FAILED_GONE = 'ما لقينا هالمنتج بالقائمة هلق: يمكن انعتمد من مكان ثاني أو انشال من الشيت. حدّث القائمة وجرّب كمان شوي.';
+
+    function failedName(job) {
+        return job.label || (job.row_number ? `صف ${job.row_number}` : 'منتج');
+    }
+
     function openFailed(job) {
         const it = failedItem(job);
         if (!it) {
-            R.toast('ما لقينا هالمنتج بالقائمة هلق: يمكن انعتمد من مكان ثاني أو انشال من الشيت. حدّث القائمة وجرّب كمان شوي.', 'warning');
+            R.toast(FAILED_GONE, 'warning');
             return;
         }
         if (S.mode !== 'single') setMode('single', { key: it.key });
         else R.single.openItem(it.key, { from: 'list' });
     }
 
+    // «أعد المحاولة» بينفع إذا الخادم رجّع الطلب كما انبعت (retry: نفس الصورة ونفس هوية المنتج وما شافه المراجع
+    // وقتها)، وما كان السبب إنه مراجع ثاني رفض هالصورة لهالمنتج (إعادتها بترجع تنرفض: لازم يختار غيرها)
+    function failedRetryable(job) {
+        if (!S.jobs || !job.retry || typeof job.retry !== 'object' || !job.retry.image_url) return false;
+        const stale = R.staleInfo({ error_code: job.error_code, reason: job.reason }, null);
+        return !(stale && stale.replaceable === false);
+    }
+
+    // «أعد المحاولة» بلا ما ينفتح المنتج: نفس الاعتماد بينبعت من جديد بطابور الخلفية (select_image مع async=1، متل زر
+    // لوحة الاعتمادات)، مع expected_state اللي انبعت أول مرة. المنتج تغيّر بعدها (اعتماد ثاني، أو الصف صار لمنتج تاني):
+    // الخادم بيرفضه، واللوحة بتقول ليش بالعربي (ومعها «استبدال» بعد تأكيد صريح). الفشل القديم بينشال من هون، لأن
+    // المحاولة الجديدة صارت باللوحة
+    function retryFailed(job) {
+        const it = failedItem(job);
+        if (!it) {
+            R.toast(FAILED_GONE, 'warning');
+            return false;
+        }
+        if (!failedRetryable(job)) {
+            openFailed(job);
+            return false;
+        }
+        if (S.jobs.has(it.key) || ['approving', 'approved'].includes(S.local.get(it.key))) {
+            R.toast(`«${failedName(job)}» انعتمد أو عم ينعتمد من هالصفحة هلق، فما في داعي تعيده.`, 'info');
+            return false;
+        }
+        const body = Object.assign({}, job.retry);
+        const expected = body.expected_state && typeof body.expected_state === 'object' ? body.expected_state : null;
+        delete body.expected_state;
+        const queued = S.jobs.enqueue({ key: it.key, type: 'approve', label: failedName(job), row: body.row_number,
+                                        ctx: { sku_key: body.sku_key || null, row_number: body.row_number },
+                                        candidate: { url: String(body.image_url) }, expected: expected,
+                                        replace: false, publishAnyway: false, body: body });
+        if (!queued) return false;
+        markSending(queued);
+        forgetFailed(job);
+        // ما بيهمنا جوابه: إذا ما انتجاهل، القراءة الجاية بتشيله لأنه اعتماد هالصفحة (أو بيرجع، وبينعاد مرة تانية)
+        R.requestJson(`${S.urls.approvalJobs}/${encodeURIComponent(job.id)}/dismiss`, { method: 'POST', body: {} }).catch(() => {});
+        return true;
+    }
+
+    // اعتماد فاشل بينشال من القائمة. الزر اللي انضغط اختفى معه: التركيز بيروح للاعتماد اللي بعده (أو اللي قبله)،
+    // وإذا ما ضل شي، لمساحة العمل؛ ما بيضيع عـ body
+    function forgetFailed(job) {
+        const d = S.dom;
+        const focused = !!(d.failed && document.activeElement && d.failed.contains(document.activeElement));
+        const before = (S.failed || []).findIndex(j => Number(j.id) === Number(job.id));
+        S.failed = (S.failed || []).filter(j => Number(j.id) !== Number(job.id));
+        renderFailed();
+        if (!focused) return;
+        const items = d.failed.hidden ? [] : d.failed.querySelectorAll('.rv-failed__item');
+        const next = items.length ? items[Math.min(Math.max(before, 0), items.length - 1)] : null;
+        const btn = next ? next.querySelector('button') : null;
+        if (btn) btn.focus();
+        else focusWorkspace();
+    }
+
     async function dismissFailed(job, btn) {
         if (btn) btn.disabled = true;
         const res = await R.requestJson(`${S.urls.approvalJobs}/${encodeURIComponent(job.id)}/dismiss`, { method: 'POST', body: {} });
         if (res.ok || res.status === 404) {
-            S.failed = (S.failed || []).filter(j => Number(j.id) !== Number(job.id));
-            renderFailed();
+            forgetFailed(job);
             return;
         }
         if (btn) btn.disabled = false;
@@ -475,19 +541,25 @@
             icon('alert', 16, 2), el('strong', { className: 'rv-failed__title', text: `اعتمادات ما زبطت (${list.length})` })
         ]));
         d.failed.appendChild(el('ul', { className: 'rv-failed__list' }, list.map(job => {
-            const name = job.label || (job.row_number ? `صف ${job.row_number}` : 'منتج');
+            const name = failedName(job);
+            // الأزرار بتتكرر لكل منتج: اسمها لقارئ الشاشة فيه اسم المنتج
             const dismiss = el('button', { type: 'button', className: 'lq-btn lq-btn--ghost lq-btn--sm rv-failed__dismiss',
-                                           dataset: { failedDismiss: job.id }, text: 'تجاهل' });
+                                           dataset: { failedDismiss: job.id }, 'aria-label': `تجاهل «${name}»`, text: 'تجاهل' });
             dismiss.addEventListener('click', () => dismissFailed(job, dismiss));
             const open = el('button', { type: 'button', className: 'lq-btn lq-btn--secondary lq-btn--sm rv-failed__open',
-                                        dataset: { failedOpen: job.id }, text: 'افتح المنتج' });
+                                        dataset: { failedOpen: job.id }, 'aria-label': `افتح «${name}»`, text: 'افتح المنتج' });
             open.addEventListener('click', () => openFailed(job));
+            const retry = failedRetryable(job)
+                ? el('button', { type: 'button', className: 'lq-btn lq-btn--primary lq-btn--sm rv-failed__retry',
+                                 dataset: { failedRetry: job.id }, 'aria-label': `أعد اعتماد «${name}» بنفس الصورة`,
+                                 text: 'أعد المحاولة', onclick: () => retryFailed(job) })
+                : null;
             return el('li', { className: 'rv-failed__item', dataset: { failedId: job.id } }, [
                 el('div', { className: 'rv-failed__text' }, [
                     bdi(name, 'rv-failed__name'),
                     el('span', { className: 'rv-failed__reason', text: failedReason(job) })
                 ]),
-                el('div', { className: 'rv-failed__actions' }, [open, dismiss])
+                el('div', { className: 'rv-failed__actions' }, [retry, open, dismiss])
             ]);
         })));
     }
@@ -632,6 +704,13 @@
             S.reason = String(S.cfg.reason);
             if (!filter) filter = 'all';
         }
+        // ?q=: البحث جاهز بمربع البحث (مرة وحدة، من «روح لـ…»)، على «الكل» إلا إذا حُددت رقاقة
+        if (S.cfg.q && !S.queryApplied) {
+            S.queryApplied = true;
+            S.query = String(S.cfg.q);
+            if (S.dom && S.dom.search) S.dom.search.value = S.query;
+            if (!filter) filter = 'all';
+        }
         // الوضع: الرابط (?mode= أو ?row=) أولاً، بعده آخر وضع اختاره المراجع بنفسه، وإلا «بالجملة» لما يكون في 10 صور مقترحة
         // بلا تحذير أو أكثر (شغل الـ 100+ منتج)
         if (!S.modeExplicit && !S.modeChosen && S.load.state === 'ready') {
@@ -765,7 +844,8 @@
         const active = item.key === S.openKey;
         const btn = el('button', { type: 'button', className: 'rv-item' + (active ? ' is-active' : ''),
                                    dataset: { key: item.key, bucket: item.bucket }, 'aria-current': active ? 'true' : null }, [
-            el('span', { className: 'rv-thumb', dataset: { thumb: thumbUrl(item) } }, [thumbFor(item)]),
+            // الصورة المصغّرة زينة: اسم المنتج وصفّه جنبها بنفس الزر، فقارئ الشاشة ما بيحكيها (alt فاضي و aria-hidden)
+            el('span', { className: 'rv-thumb', 'aria-hidden': 'true', dataset: { thumb: thumbUrl(item) } }, [thumbFor(item)]),
             el('span', { className: 'rv-item__text' }, [
                 bdi(p.product_name || p.product_name_ar || 'بلا اسم', 'rv-item__name'),
                 el('span', { className: 'rv-item__meta' }, [
@@ -947,10 +1027,15 @@
         if (['failed', 'not_found'].includes(S.filter) && S.load.state === 'ready') {
             const failing = visibleItems().filter(it => it.product.has_error && !it.orphan && !S.local.get(it.key));
             if (failing.length > 1 && S.urls.retry) {
+                // «رجّع وشغّل»: للطابور وبعدين صفحة التشغيل على هالصفوف بس، بدل ما تروح وتكتب الصفوف بإيدك
                 d.queueNote.appendChild(el('div', { className: 'rv-retry-all' }, [
-                    el('span', { text: 'إعادة المحاولة بترجّعها للطابور، وما بتبلش معالجتها لحالها.' }),
+                    el('span', { text: S.urls.run ? '«رجّع وشغّل» بيفتح التشغيل على هالصفوف بس، والتقدير قدامك قبل ما تبدأ.'
+                        : 'إعادة المحاولة بترجّعها للطابور، وما بتبلش معالجتها لحالها.' }),
+                    S.urls.run ? el('button', { type: 'button', className: 'lq-btn lq-btn--primary lq-btn--sm', id: 'rvRetryRun',
+                                                text: `رجّع وشغّل (${failing.length})`,
+                                                onclick: () => R.single.retryFailures(failing, { thenRun: true }) }) : null,
                     el('button', { type: 'button', className: 'lq-btn lq-btn--secondary lq-btn--sm',
-                                   text: `رجّع ${plural(failing.length, 'منتج واحد', 'منتجات')} للطابور`,
+                                   text: S.urls.run ? 'للطابور بس' : `رجّع ${plural(failing.length, 'منتج واحد', 'منتجات')} للطابور`,
                                    onclick: () => R.single.retryFailures(failing) })
                 ]));
             }
@@ -1013,8 +1098,9 @@
         const actions = [];
         if (retryable.length && S.urls.retry) {
             actions.push(el('button', { type: 'button', className: 'lq-btn lq-btn--primary', id: 'rvRetryNotFound',
-                                        text: `رجّع اللي ما انلقت للطابور (${retryable.length})`,
-                                        onclick: () => R.single.retryFailures(retryable) }));
+                                        text: S.urls.run ? `رجّع اللي ما انلقت وشغّلها (${retryable.length})`
+                                            : `رجّع اللي ما انلقت للطابور (${retryable.length})`,
+                                        onclick: () => R.single.retryFailures(retryable, { thenRun: true }) }));
         } else if (notFound.length) {
             actions.push(el('button', { type: 'button', className: 'lq-btn lq-btn--secondary', text: `شوف اللي ما انلقت (${notFound.length})`,
                                         onclick: () => setFilter('not_found') }));
@@ -1066,13 +1152,22 @@
             node.classList.toggle('is-active', on);
             if (on) {
                 node.setAttribute('aria-current', 'true');
-                if (scroll && typeof node.scrollIntoView === 'function') node.scrollIntoView({ block: 'nearest' });
+                if (scroll) R.scrollIntoView(node, { block: 'nearest' });
             } else {
                 node.removeAttribute('aria-current');
             }
         });
     }
     R.markActive = markActive;
+
+    // جملة لقارئ الشاشة بالمنطقة المؤدبة (rvAnnounce): بتتفضّى قبل، فنفس الجملة مرتين (رجعت لنفس المنتج) بتنحكى كمان
+    function announce(text) {
+        const node = S.dom.announce;
+        if (!node) return;
+        node.textContent = '';
+        node.textContent = String(text || '');
+    }
+    R.announce = announce;
 
     // -------------------------------------------------------------------------------------------------
     // Background approvals panel, and «تراجع» while an approval is held (jobs.js holdMs)
@@ -1101,10 +1196,15 @@
         groups.forEach(g => {
             const n = g.jobs.length;
             const left = Math.max(0, Math.ceil((g.releaseAt - Date.now()) / 1000));
-            const what = n === 1 ? ['اعتمدت ', bdi(g.jobs[0].label || `صف ${g.jobs[0].row}`, 'rv-undo__name', 'auto')]
-                : [`اعتمدت ${imagesText(n)}`];
-            box.appendChild(el('div', { className: 'rv-undo__row', dataset: { group: String(g.group) } }, [
-                el('span', { className: 'rv-undo__ok' }, [icon('check', 18, 2.2)]),
+            // رفض محجوز (وضع الجملة، bulk.js rejectList): «رفضت … («السبب»)» بإشارة x بدل «اعتمدت»
+            const j = g.jobs[0];
+            const reject = g.jobs.every(x => x.type === 'reject');
+            const verb = reject ? 'رفضت' : 'اعتمدت';
+            const why = reject && j.reason && R.reasonLabel ? ` («${R.reasonLabel(j.reason)}»)` : '';
+            const what = n === 1 ? [`${verb} `, bdi(j.label || `صف ${j.row}`, 'rv-undo__name', 'auto'), why]
+                : [`${verb} ${imagesText(n)}${why}`];
+            box.appendChild(el('div', { className: `rv-undo__row${reject ? ' is-reject' : ''}`, dataset: { group: String(g.group) } }, [
+                el('span', { className: 'rv-undo__ok' }, [icon(reject ? 'x' : 'check', 18, 2.2)]),
                 el('span', { className: 'rv-undo__text' }, what.concat([
                     // العدّ بيتغيّر كل نص ثانية: قارئ الشاشة ما بيقراه كل مرة
                     el('span', { className: 'rv-undo__left', 'aria-hidden': 'true', text: ` · بتنبعت بعد ${left} ث` })
@@ -1242,6 +1342,23 @@
         R.toast(jobs.length === 1 ? 'تراجعت: ما انعتمدت.' : `تراجعت: ما انعتمد ولا وحدة من ${imagesText(jobs.length)}.`, 'info');
     }
 
+    // طلب انبعت من جديد (زر لوحة الاعتمادات، أو «أعد المحاولة» بـ«اعتمادات ما زبطت»): منتجه «جاري الاعتماد» (أو «جاري
+    // الرفض») بالقائمة ومساحة العمل. رفض صورة بديلة والمراجع ضل عالمنتج (job.stay): المنتج نفسه بيضل بانتظار المراجعة
+    function markSending(job) {
+        const key = R.productKeyOf(job);
+        if (!job.stay) S.local.set(key, job.type === 'reject' ? 'rejecting' : 'approving');
+        rebuild();
+        if (S.mode === 'single') {
+            patchList([key]);
+            if (S.openKey === key) R.single.renderWorkspace();
+            else R.single.updateBar();
+            markActive();
+        } else {
+            renderList();
+            R.bulk.render();
+        }
+    }
+
     function setupJobs() {
         S.jobs = R.createJobQueue({
             concurrency: APPROVE_CONCURRENCY,
@@ -1260,19 +1377,8 @@
             // طلب يُعاد: منتجه «جاري الاعتماد» (أو «جاري الرفض») من جديد، فلا يظهر بانتظار المراجعة وهو عم ينعتمد
             // رفض صورة بديلة والمراجع ضل عالمنتج (job.stay): المنتج نفسه بيضل بانتظار المراجعة
             onRetry: job => {
-                const key = R.productKeyOf(job);
-                if (!job.stay) S.local.set(key, job.type === 'reject' ? 'rejecting' : 'approving');
                 R.single.jobRetried(job);
-                rebuild();
-                if (S.mode === 'single') {
-                    patchList([key]);
-                    if (S.openKey === key) R.single.renderWorkspace();
-                    else R.single.updateBar();
-                    markActive();
-                } else {
-                    renderList();
-                    R.bulk.render();
-                }
+                markSending(job);
             },
             onUpdate: st => {
                 renderJobs(st);
@@ -1482,7 +1588,9 @@
             const images = (opts.images || []).filter(im => im && im.url);
             clear(d.dialog);
             dlg.box = el('div', { className: 'rv-dialog' + (opts.wide ? ' rv-dialog--wide' : ''), role: opts.noCancel ? 'dialog' : 'alertdialog',
-                                  'aria-modal': 'true', 'aria-labelledby': 'rvAskTitle', 'aria-describedby': 'rvAskText' }, [
+                                  'aria-modal': 'true', 'aria-labelledby': 'rvAskTitle',
+                                  // نافذة بلا نص (الاختصارات): ما في rvAskText، فما في aria-describedby يأشّر على عنصر مش موجود
+                                  'aria-describedby': opts.text ? 'rvAskText' : null }, [
                 el('h2', { className: 'rv-dialog__title', id: 'rvAskTitle', text: opts.title || '' }),
                 images.length ? el('div', { className: 'rv-dialog__images' }, images.map(im => el('figure', { className: 'rv-dialog__figure' }, [
                     el('div', { className: 'rv-dialog__img' }, [R.img(im.url, im.caption || '', S.urls.imageProxy)]),
@@ -1545,14 +1653,25 @@
         single: [
             ['Enter', 'اعتماد الصورة المختارة'], ['X', 'رفض (وبعدها 1–9 للسبب)'], ['S', 'تخطي للمنتج التالي'],
             ['↑ ↓', 'المنتج اللي قبل / بعد'], ['1–9', 'اختيار صورة من تحت (بدون اعتماد)'], ['Z', 'تكبير الصورة ومقارنتها بالشيت'],
-            ['Esc', 'سكّر أي نافذة'], ['?', 'هالقائمة']
+            ['+ − 0', 'بالتكبير: كبّر، صغّر، رجّع'], ['Esc', 'سكّر أي نافذة'], ['Ctrl+K أو /', 'روح لـ… (أي صفحة أو منتج)'],
+            ['?', 'هالقائمة']
         ],
         bulk: [
             ['← → ↑ ↓', 'التنقل بين البطاقات'], ['مسافة', 'تحديد البطاقة'], ['Shift + ضغطة', 'تحديد كل اللي بيناتهم'],
-            ['A', 'اعتماد البطاقة'], ['Shift+A', 'اعتماد المحددة بلا تحذير'], ['R أو X', 'رفض البطاقة (وبعدها 1–7 للسبب)'],
-            ['Z', 'تكبير الصورة ومقارنتها بالشيت'], ['Esc', 'سكّر أي نافذة'], ['?', 'هالقائمة']
+            ['Enter أو A', 'اعتماد البطاقة'], ['Shift+A', 'اعتماد المحددة بلا تحذير'], ['X أو R', 'رفض البطاقة (وبعدها 1–7 للسبب)'],
+            ['Z', 'تكبير الصورة ومقارنتها بالشيت'], ['+ − 0', 'بالتكبير: كبّر، صغّر، رجّع'], ['Esc', 'سكّر أي نافذة'],
+            ['Ctrl+K أو /', 'روح لـ… (أي صفحة أو منتج)'], ['?', 'هالقائمة']
         ]
     };
+
+    // زر «?» ظاهر جنب العنوان (بالوضعين): قائمة الاختصارات بدون ما تعرف إنه في مفتاح «?». بيختفي على شاشات اللمس
+    // متل باقي تلميحات المفاتيح (.rv-keyhint)
+    function keysButton() {
+        return el('button', { type: 'button', className: 'lq-btn lq-btn--ghost lq-btn--sm lq-btn--icon rv-keys-btn rv-keyhint',
+                              'aria-label': 'اختصارات لوحة المفاتيح', title: 'اختصارات لوحة المفاتيح (?)', 'aria-keyshortcuts': '?',
+                              text: '?', onclick: () => showShortcuts() });
+    }
+    R.keysButton = keysButton;
 
     function showShortcuts() {
         const rows = SHORTCUTS[S.mode] || SHORTCUTS.single;
@@ -1814,7 +1933,8 @@
             if (toggleMoreMenu(false)) return;
             if (R.bulk.closeDialog()) return;
             if (S.reasonsOpen) {
-                R.single.closeReasons();
+                // التركيز كان بأسباب الرفض: بيرجع لزر «رفض» اللي فتحها
+                R.single.closeReasons(false, true);
                 return;
             }
             return;
@@ -1830,7 +1950,7 @@
             if ((key === ' ' || key === 'Enter') && ['button', 'a', 'summary', 'label', 'input'].includes(tag)) return;
             // التكرار يُقبل للأسهم فقط: A المضغوط باستمرار لا يعتمد البطاقة التالية قبل أن يراها المراجع
             if (e.repeat && !/^Arrow/.test(key)) {
-                if (key === ' ' || key === 'a') e.preventDefault();
+                if (key === ' ' || key === 'a' || key === 'Enter') e.preventDefault();
                 return;
             }
             if (R.bulk.onKey(key, e)) e.preventDefault();

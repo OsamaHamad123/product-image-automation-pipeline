@@ -261,9 +261,11 @@ def test_layout_loads_only_google_fonts_and_local_css():
     layout = read(LAYOUT)
     hosts = set(re.findall(r"(?:href|src)=\"(?:https?:)?//([^/\"]+)", layout))
     assert hosts == {"fonts.googleapis.com", "fonts.gstatic.com"}, hosts
-    # one script: the shell's own file, versioned so the browser caches it; no inline block
+    # the shell's own files, versioned so the browser caches them, and the «روح لـ…» places as JSON; no inline block
     assert re.findall(r"<script\b[^>]*>", layout, flags=re.IGNORECASE) == [
-        "<script src=\"{{ asset('js/layout.js') }}?v={{ @filemtime(public_path('js/layout.js')) ?: '1' }}\">"]
+        "<script type=\"application/json\" id=\"lqGotoIndex\">",
+        "<script src=\"{{ asset('js/layout.js') }}?v={{ @filemtime(public_path('js/layout.js')) ?: '1' }}\">",
+        "<script src=\"{{ asset('js/jump.js') }}?v={{ @filemtime(public_path('js/jump.js')) ?: '1' }}\">"]
     assert not inline_scripts(layout)
     assert layout.index("js/layout.js") < layout.index("@yield('scripts')") < layout.index("@stack('scripts')")
     stylesheets = re.findall(r"<link rel=\"stylesheet\" href=\"([^\"]+)\"", layout)

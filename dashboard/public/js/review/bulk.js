@@ -9,15 +9,20 @@
  * chips of products that need work one by one (ما انلقت، أعطال، الخلفية) open single mode.
  *
  * The cards come in order of confidence (pre-selected without a warning, the reviewer's earlier pick, with a warning,
- * nothing proposed), each brand's cards together. Keys: arrows move between cards, Space ticks the focused card,
- * Shift+click ticks a range, A approves the focused card (after its warnings, like its button), Shift+A is the bulk
- * button (the ticked ones without warning), R / X rejects the focused card (then 1–7 for the reason), Z zooms.
+ * nothing proposed), each brand's cards together. Keys: Tab enters the grid once (roving tabindex: the focused card,
+ * or the first, is the grid's one tab stop), arrows move between cards, Space ticks the focused card, Shift+Space or
+ * Shift+click ticks a range, A or Enter approves the focused card (after its warnings, like its button), Shift+A is
+ * the bulk button (the ticked ones without warning), R / X rejects the focused card (then 1–7 for the reason), Z zooms.
+ *
+ * Rejects are held approveUndoMs like approvals (jobs.js holdMs): «تراجع» in the same undo box takes them back before
+ * anything is sent. Shift+A asks first only when undo is off or a ticked card has a warning.
  *
  * The reviewer never approves a picture they did not see: a card counts as seen once its picture has loaded while the
  * card was in the viewport (IntersectionObserver). Only seen cards are pre-ticked, approved by A or included in
  * Shift+A (the rest are counted and said); a picture that failed to render is never approvable. A tick belongs to the
  * picture it was given for (product key + pick URL): a reload that changes the pick drops it. A click anywhere in a
- * card moves the keyboard focus to that card; after A advances, a second A within approveSettleMs is ignored.
+ * card moves the keyboard focus to that card; after A / Enter or a quick reject advances, another A, Enter, R or X
+ * within approveSettleMs is ignored (a held key never repeats: app.js).
  */
 (function (root) {
     'use strict';
@@ -156,8 +161,10 @@
         return f && f.waiting ? f.key : 'all';
     }
 
+    // البحث بوضع الجملة: نفس بحث قائمة المنتج الواحد (الاسم، الماركة، الباركود، رقم الصف، SKU)
     function visibleCards() {
-        return byFilter(byBrand(source()), currentFilter());
+        const q = st().bulk.query || '';
+        return byFilter(byBrand(source()), currentFilter()).filter(it => R.matchesQuery(it, q));
     }
 
     // البطاقات المرسومة فعلاً (أول B.limit). التحديد والاعتماد والرفض بالجملة لا يلمسون صورة ما شافها المراجع
@@ -222,7 +229,8 @@
         d.bulkCount = el('span', { className: 'rv-bulk__count', text: '' });
         d.bulkProgress = el('span', { className: 'rv-bulk__progress', id: 'rvBulkProgress', 'aria-live': 'polite', hidden: true });
         d.bulkHead = el('header', { className: 'rv-bulk__head' }, [
-            el('div', { className: 'rv-bulk__titles' }, [el('h1', { className: 'rv-bulk__h1', text: 'قائمة المراجعة' }), d.bulkCount, d.bulkProgress]),
+            el('div', { className: 'rv-bulk__titles' }, [el('h1', { className: 'rv-bulk__h1', text: 'قائمة المراجعة' }), d.bulkCount, d.bulkProgress,
+                                                          R.keysButton()]),
             R.modeToggle('bulk')
         ]);
         d.bulkBrand = el('select', { className: 'rv-brand__select', 'aria-label': 'الماركة' });
@@ -241,15 +249,29 @@
         d.bulkExport = el('a', { className: 'lq-btn lq-btn--ghost lq-btn--sm rv-bulk__export', href: S.urls.export,
                                  title: 'ملف CSV بكل صورة انحفظت ورابطها وحالتها: معتمدة من مراجع، أو آلية، أو مستبدلة' },
                           [icon('upload', 16), el('span', { text: 'تصدير سجل الصور (CSV)' })]);
+        d.bulkSearch = el('input', { type: 'search', className: 'lq-search__input', id: 'rvBulkSearch',
+                                     placeholder: 'اسم، باركود، أو رقم صف', autocomplete: 'off', spellcheck: 'false' });
+        let searchTimer = null;
+        d.bulkSearch.addEventListener('input', () => {
+            clearTimeout(searchTimer);
+            searchTimer = setTimeout(() => {
+                S.bulk.query = d.bulkSearch.value;
+                S.bulk.limit = PAGE;
+                seedSelection();
+                render();
+            }, 120);
+        });
         d.bulkTools = el('div', { className: 'rv-bulk__tools' }, [
+            el('label', { className: 'lq-search rv-search rv-bulk__search' }, [icon('search', 18),
+                el('span', { className: 'lq-sr-only', text: 'بحث بالبطاقات' }), d.bulkSearch]),
             el('label', { className: 'rv-brand' }, [el('span', { className: 'rv-brand__k', text: 'الماركة' }), d.bulkBrand]),
             d.bulkFilters,
             d.bulkExport
         ]);
         // سطر المفاتيح: بيختفي على شاشات اللمس (review.css @media (hover: none))
         d.bulkKeys = el('p', { className: 'rv-bulk__keys rv-keyhint' }, [
-            R.kbd('← → ↑ ↓'), el('span', { text: ' للتنقل · ' }), R.kbd('مسافة'), el('span', { text: ' للتحديد (Shift+ضغطة لمجموعة) · ' }),
-            R.kbd('A'), el('span', { text: ' اعتماد · ' }), R.kbd('R'), el('span', { text: ' رفض · ' }),
+            R.kbd('← → ↑ ↓'), el('span', { text: ' للتنقل · ' }), R.kbd('مسافة'), el('span', { text: ' للتحديد (مع Shift لمجموعة) · ' }),
+            R.kbd('A'), el('span', { text: ' أو ' }), R.kbd('Enter'), el('span', { text: ' اعتماد · ' }), R.kbd('R'), el('span', { text: ' رفض · ' }),
             R.kbd('Z'), el('span', { text: ' تكبير · ' }), R.kbd('?'), el('span', { text: ' كل الاختصارات' })
         ]);
 
@@ -279,6 +301,7 @@
         d.bulkGrid = el('div', { className: 'rv-cards', id: 'rvBulkGrid' });
         d.bulkGrid.addEventListener('click', onGridClick);
         d.bulkGrid.addEventListener('change', onGridChange);
+        d.bulkGrid.addEventListener('focusin', onGridFocus);
         d.bulkMore = el('div', { className: 'rv-bulk__more' });
         d.bulkLane = el('div', { className: 'rv-bulk__lane', role: 'status', hidden: true });
         box.appendChild(el('div', { className: 'rv-bulk__top' }, [d.bulkHead, d.bulkLane, d.bulkTools, d.bulkKeys]));
@@ -433,6 +456,9 @@
         return node;
     }
 
+    // البطاقة اللي إلها tabindex 0 بالرسم الجاي (المركّزة، وإلا الأولى)
+    let rovingKey = null;
+
     function card(it) {
         const S = st();
         const p = it.product;
@@ -453,8 +479,10 @@
         let overlay = null;
         if (state === 'approving' || state === 'rejecting') {
             const job = S.jobs ? S.jobs.activeFor(it.key) : null;
+            const rejecting = state === 'rejecting';
             overlay = job && job.state === 'held'
-                ? el('span', { className: 'rv-card__overlay is-held' }, [icon('check', 18, 2.2), el('span', { text: 'رح تنعتمد…' })])
+                ? el('span', { className: 'rv-card__overlay is-held' + (rejecting ? ' is-reject' : '') },
+                     [icon(rejecting ? 'x' : 'check', 18, 2.2), el('span', { text: rejecting ? 'رح تنرفض…' : 'رح تنعتمد…' })])
                 : el('span', { className: 'rv-card__overlay' }, [el('span', { className: 'lq-spinner', 'aria-hidden': 'true' }),
                                                                  el('span', { text: state === 'approving' ? 'جاري الاعتماد…' : 'جاري الرفض…' })]);
         } else if (state === 'approved') {
@@ -465,7 +493,8 @@
         return el('article', {
             className: 'rv-card' + (checked ? ' is-selected' : '') + (busyOrDone(it) ? ' is-done' : '') + (focused ? ' is-focused' : ''),
             dataset: { key: it.key, kind: kindOf(it) },
-            tabindex: '-1',
+            // roving tabindex: Tab بيدخل الشبكة مرة وحدة (عالبطاقة المركّزة أو الأولى)، والأسهم بتتنقّل جوّاها
+            tabindex: it.key === rovingKey ? '0' : '-1',
             'aria-current': focused ? 'true' : null
         }, [
             el('div', { className: 'rv-card__img' + (sel ? '' : ' is-unproposed'),
@@ -561,7 +590,7 @@
         drawChips(inBrand, loading, unread);
         paintProgress();
 
-        const visible = byFilter(inBrand, currentFilter());
+        const visible = visibleCards();
         const shown = visible.slice(0, B.limit);
         if (!B.seeded && S.load.state === 'ready') {
             B.seeded = true;
@@ -612,6 +641,7 @@
         shown.forEach(it => {
             if (!S.seen.has(it.key)) R.snapshot(it);
         });
+        rovingKey = B.focus || shown[0].key;
         shown.forEach(it => d.bulkGrid.appendChild(card(it)));
         observeCards();
         if (B.focus && B.focusDom) {
@@ -794,16 +824,23 @@
         // المقترحة بلا تحذير التي لم تظهر للمراجع (محددة أو لا) تُترك، ويُقال عددها
         const skipped = shown.filter(it => eligibleNow(it) && !seenNow(it)).length;
         const skip = skipped > 0 ? ` ${skipped === 1 ? 'وحدة مقترحة' : `${skipped} مقترحة`} ما ظهرت صورتها لك بعد، فما رح تنعتمد هلق.` : '';
-        return R.ask({ title: `اعتماد ${R.imagesText(n)}؟`,
-                       text: 'بتنحط بالشيت وبتقدر تكمل شغلك. اللي فيها تحذير أو بلا اقتراح ما رح تنلمس.' + skip,
-                       confirmText: 'اعتمدها' }).then(ok => {
-            if (!ok) return false;
+        const send = () => {
             // انحسبت من جديد بعد السؤال: بطاقة صارت مش قابلة للاعتماد وقت السؤال بتنترك
             const done = enqueueApprovals(list.filter(it => S.byKey.get(it.key) && ticked(it) && eligibleNow(it) && seenNow(it)));
             R.rebuild();
             R.patchList(list.map(it => it.key));
             render();
             return done > 0;
+        };
+        // كل المحددة مقترحة بلا تحذير وشافها المراجع، و«تراجع» شغّال: ما في داعي للسؤال، الاعتماد محجوز ثواني وبيرجع بضغطة.
+        // في محددة فيها تحذير (أو مش من اقتراح النظام)، أو التراجع مطفي: منسأل متل قبل
+        const undoMs = parseInt(S.cfg.approveUndoMs, 10) || 0;
+        const clean = shown.filter(ticked).every(it => eligibleNow(it) && !R.cautionsFor(selectedOf(it)).length);
+        if (undoMs > 0 && clean) return Promise.resolve(send());
+        return R.ask({ title: `اعتماد ${R.imagesText(n)}؟`,
+                       text: 'بتنحط بالشيت وبتقدر تكمل شغلك. اللي فيها تحذير أو بلا اقتراح ما رح تنلمس.' + skip,
+                       confirmText: 'اعتمدها' }).then(ok => {
+            return ok ? send() : false;
         });
     }
 
@@ -857,8 +894,13 @@
         const d = S.dom;
         if (!d.bulkGrid) return;
         let target = null;
-        d.bulkGrid.querySelectorAll('.rv-card').forEach(node => {
+        const nodes = Array.from(d.bulkGrid.querySelectorAll('.rv-card')).filter(n => n.hasAttribute('data-key'));
+        const roving = B.focus && nodes.some(n => n.getAttribute('data-key') === B.focus) ? B.focus
+            : (nodes[0] ? nodes[0].getAttribute('data-key') : null);
+        rovingKey = roving;
+        nodes.forEach(node => {
             const on = !!B.focus && node.getAttribute('data-key') === B.focus;
+            node.setAttribute('tabindex', node.getAttribute('data-key') === roving ? '0' : '-1');
             node.classList.toggle('is-focused', on);
             if (on) {
                 node.setAttribute('aria-current', 'true');
@@ -903,8 +945,10 @@
         const it = list[idx];
         if (key === ' ') {
             if (selectable(it)) {
-                if (e && e.shiftKey && B.anchor) tickRange(B.anchor, it.key, !ticked(it));
-                else toggleTick(it, !ticked(it));
+                // Shift+مسافة متل Shift+ضغطة: من آخر بطاقة حددتها لهون. بلا نقطة بداية (أو صارت برّا الشبكة): هالبطاقة بس
+                const on = !ticked(it);
+                const ranged = !!(e && e.shiftKey && B.anchor && B.anchor !== it.key) && tickRange(B.anchor, it.key, on) > 0;
+                if (!ranged) toggleTick(it, on);
                 B.anchor = it.key;
                 B.focusDom = true;
                 refreshCards();
@@ -912,9 +956,11 @@
             }
             return true;
         }
-        if (key === 'a') {
-            // بعد اعتماد بـ A والانتقال للبطاقة التالية: ضغطة ثانية سريعة لا تعتمدها قبل أن يراها المراجع
-            if (Date.now() - (B.advancedAt || 0) < settleMs()) return true;
+        // بعد اعتماد أو رفض والانتقال للبطاقة التالية: ضغطة سريعة ثانية ما بتعتمدها ولا بترفضها قبل ما يشوفها المراجع
+        const settling = Date.now() - (B.advancedAt || 0) < settleMs();
+        if (key === 'a' || (key === 'Enter' && !(e && e.shiftKey))) {
+            // Enter متل A (متل وضع منتج واحد)؛ Enter على زر أو رابط بالبطاقة بيضغطه المتصفح نفسه (app.js)
+            if (settling) return true;
             const advance = () => {
                 B.advancedAt = Date.now();
                 focusCard(nextOpen(shownCards(), idx) || it.key);
@@ -925,7 +971,7 @@
             return true;
         }
         if (key === 'r' || key === 'x') {
-            if (selectable(it)) openRejectDialog([it], { quick: true });
+            if (!settling && selectable(it)) openRejectDialog([it], { quick: true });
             return true;
         }
         if (key === 'z') {
@@ -945,6 +991,17 @@
         B.focus = key;
         B.focusDom = true;
         return changed;
+    }
+
+    // التركيز دخل الشبكة بـ Tab (أو لزر جوّا بطاقة): هاي البطاقة صارت المركّزة، فالمفاتيح بتشتغل عليها
+    function onGridFocus(e) {
+        const B = st().bulk;
+        const node = e && e.target && e.target.closest ? e.target.closest('.rv-card') : null;
+        const key = node ? node.getAttribute('data-key') : null;
+        if (!key || B.focus === key) return;
+        B.focus = key;
+        B.focusDom = false;
+        paintFocus();
     }
 
     // Shift على آخر نقرة على مربع تحديد (حدث change ما بيحمل shiftKey)
@@ -1003,8 +1060,8 @@
             paintFocus();
             return;
         }
-        if (shiftClick && B.anchor && B.anchor !== key) tickRange(B.anchor, key, !!t.checked);
-        else toggleTick(it, !!t.checked);
+        const ranged = shiftClick && B.anchor && B.anchor !== key && tickRange(B.anchor, key, !!t.checked) > 0;
+        if (!ranged) toggleTick(it, !!t.checked);
         shiftClick = false;
         B.anchor = key;
         refreshCards();
@@ -1104,7 +1161,7 @@
             if (dialog.quick) {
                 const chosen = dialog.list;
                 closeDialog();
-                rejectList(chosen, reason.code);
+                rejectList(chosen, reason.code, { advance: true });
             }
             return true;
         }
@@ -1123,26 +1180,63 @@
         return false;
     }
 
-    function rejectList(list, code) {
+    // رفض بالجملة (أو بطاقة وحدة بـ R / X): بطلب لكل وحدة بالطابور، محجوزة سوا approveUndoMs متل الاعتماد، فـ«تراجع»
+    // بنفس الصندوق بيرجّعها كلها قبل ما ينبعت شي. الرفض ما بيدوّر من جديد هلق (research false)؛ القائمة بتنقرا بهدوء
+    // بعد ما يخلص الطابور (app.js onDrain) متل قبل. opts.advance (R / X): التركيز للبطاقة الجاية متل A
+    function rejectList(list, code, opts) {
         const S = st();
-        const keys = [];
+        const B = S.bulk;
+        opts = opts || {};
+        const focusedAt = shownCards().findIndex(it => it.key === B.focus);
+        const specs = [];
         list.forEach(it => {
             const sel = selectedOf(it);
             if (!sel || !selectable(it)) return;
             const ctx = contextFor(it);
-            const job = S.jobs.enqueue({ key: it.key, type: 'reject', label: it.product.product_name || it.product.product_name_ar,
-                                         row: ctx.row_number, ctx: ctx, candidate: sel,
-                                         body: R.rejectBody(ctx, sel, code, false, '') });
-            if (job) {
-                keys.push(it.key);
-                S.local.set(it.key, 'rejecting');
-                S.bulk.selected.delete(tickKey(it));
-            }
+            specs.push({ key: it.key, type: 'reject', label: it.product.product_name || it.product.product_name_ar,
+                         row: ctx.row_number, ctx: ctx, candidate: sel, reason: code, tick: ticked(it) ? tickKey(it) : null,
+                         body: R.rejectBody(ctx, sel, code, false, '') });
+        });
+        const jobs = S.jobs.enqueueMany(specs, { holdMs: S.cfg.approveUndoMs, onCancel: undoRejects });
+        const keys = jobs.map(j => j.key);
+        jobs.forEach(job => {
+            S.local.set(job.key, 'rejecting');
+            const it = S.byKey.get(job.key);
+            if (it) B.selected.delete(tickKey(it));
         });
         noteReviewed(keys);
         R.rebuild();
         R.patchList(keys);
+        if (opts.advance && keys.length && keys.includes(B.focus)) {
+            const next = nextOpen(shownCards(), focusedAt);
+            if (next) {
+                B.focus = next;
+                B.focusDom = true;
+                B.advancedAt = Date.now();
+            }
+        }
         render();
+        return keys.length;
+    }
+
+    // «تراجع» عن رفض لسا ما انبعت: البطاقات بترجع متل ما كانت (مع تحديدها)، ولا طلب وصل للخادم
+    function undoRejects(jobs) {
+        const S = st();
+        const B = S.bulk;
+        jobs.forEach(job => {
+            if (S.local.get(job.key) === 'rejecting') S.local.delete(job.key);
+            if (job.tick) B.selected.add(job.tick);
+            B.reviewed.delete(job.key);
+        });
+        R.rebuild();
+        if (S.mode === 'bulk' && jobs[0] && S.byKey.get(jobs[0].key)) {
+            // التركيز بيرجع للبطاقة (زر «تراجع» انشال)
+            B.focus = jobs[0].key;
+            B.focusDom = true;
+        }
+        R.renderList();
+        render();
+        R.toast(jobs.length === 1 ? 'تراجعت: ما انرفضت.' : `تراجعت: ما انرفض ولا وحدة من ${R.imagesText(jobs.length)}.`, 'info');
     }
 
     function closeDialog() {
@@ -1160,7 +1254,7 @@
     R.bulk = {
         build, render, onFilter, approveSelected, approveOne, openRejectDialog, closeDialog, dialogOpen: () => !!dialog, dialogKey,
         visibleCards, shownCards, kindOf, laneOfCard, laneLine, laneView, progressView, seedSelection, rejectList, onKey,
-        refreshCards, openLightbox, tickRange,
+        refreshCards, openLightbox, tickRange, undoRejects,
         // مفاتيح المنتجات المحددة الآن (لصورها الحالية)
         tickedKeys: () => shownCards().filter(ticked).map(it => it.key)
     };

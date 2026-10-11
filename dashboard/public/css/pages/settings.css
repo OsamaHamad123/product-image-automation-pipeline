@@ -473,6 +473,32 @@
         display: none;
     }
 
+    /* more tabs behind an edge: that edge fades out (settings.js sets data-more; the start is on the right in RTL) */
+    .lq-settings__tabs[data-more="end"] {
+        -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent);
+        mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent);
+    }
+
+    .lq-settings__tabs[data-more="start"] {
+        -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 40px), transparent);
+        mask-image: linear-gradient(to left, #000 calc(100% - 40px), transparent);
+    }
+
+    .lq-settings__tabs[data-more="both"] {
+        -webkit-mask-image: linear-gradient(to right, transparent, #000 40px, #000 calc(100% - 40px), transparent);
+        mask-image: linear-gradient(to right, transparent, #000 40px, #000 calc(100% - 40px), transparent);
+    }
+
+    [dir="rtl"] .lq-settings__tabs[data-more="end"] {
+        -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 40px), transparent);
+        mask-image: linear-gradient(to left, #000 calc(100% - 40px), transparent);
+    }
+
+    [dir="rtl"] .lq-settings__tabs[data-more="start"] {
+        -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent);
+        mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent);
+    }
+
     .lq-body .lq-settings__tab,
     .lq-settings__tab {
         flex-shrink: 0;
@@ -703,4 +729,18 @@
 .lq-settings-card,
 .lq-keys__row {
     scroll-margin-block-start: var(--lq-space-5);
+}
+
+/* a refused value's message under its field (SettingsController field_errors, $fieldError in the views) */
+.lq-settings-error {
+    display: block;
+    font-weight: 500;
+}
+
+/* a developer detail after the owner's way (e.g. the command line next to «حدّث الفهرس هلق») */
+.lq-settings-card__tech {
+    display: block;
+    margin-block-start: var(--lq-space-1);
+    font-size: 12px;
+    color: var(--lq-text-3);
 }

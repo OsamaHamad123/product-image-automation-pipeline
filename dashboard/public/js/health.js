@@ -1162,8 +1162,21 @@
             note: String(data.note || ''), pending: data.pending === true };
     }
 
+    /*
+     * The log tab a key moves to (the ARIA tabs pattern), or -1 for a key that is not one of them: Home / End the
+     * first / last, the arrows the one beside it on screen (in RTL, ← is the next one), going round at the ends.
+     */
+    function tabStep(key, index, count, rtl) {
+        if (!(count > 0)) return -1;
+        if (key === 'Home') return 0;
+        if (key === 'End') return count - 1;
+        if (key !== 'ArrowLeft' && key !== 'ArrowRight') return -1;
+        var forward = (key === 'ArrowLeft') === (rtl !== false);
+        return (index + (forward ? 1 : count - 1)) % count;
+    }
+
     var api = {
-        attentionView: attentionView, GOTO: GOTO, ATTENTION_URL: ATTENTION_URL,
+        attentionView: attentionView, GOTO: GOTO, ATTENTION_URL: ATTENTION_URL, tabStep: tabStep,
         lanesView: lanesView, LANES: LANES,
         publishView: publishView, publishRunningView: publishRunningView, createPublishCheck: createPublishCheck,
         bgView: bgView, bgProblem: bgProblem, BG_SKIP_RE: BG_SKIP_RE, BG_METHOD_LABELS: BG_METHOD_LABELS,
@@ -1260,12 +1273,29 @@
         if (advanced && !advanced.open) advanced.open = true;
     }
 
-    // a link to a card inside «تفاصيل متقدمة» (#publish-check from the review screen) opens it first
-    (function () {
-        var hash = window.location && window.location.hash ? window.location.hash.slice(1) : '';
-        var target = hash ? document.getElementById(hash) : null;
-        if (target && advanced && advanced.contains(target)) openAdvanced();
-    })();
+    // a link to a card inside «تفاصيل متقدمة» (#publish-check from the review screen, «روح على», «روح لـ…») opens it
+    // first, then the card comes into view: on load, on a hash change, and on a «روح على» link clicked twice
+    function revealHash(hash, scroll) {
+        var id = String(hash || '').replace(/^#/, '');
+        var target = id ? document.getElementById(id) : null;
+        if (!target || !advanced || !advanced.contains(target)) return false;
+        openAdvanced();
+        if (scroll) scrollToCard(target);
+        return true;
+    }
+
+    // a card into view: smooth, unless the system asks for less motion
+    function scrollToCard(node) {
+        if (!node || !node.scrollIntoView) return;
+        var still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+        node.scrollIntoView({ block: 'start', behavior: still ? 'auto' : 'smooth' });
+    }
+    revealHash(window.location && window.location.hash, true);
+    if (typeof window.addEventListener === 'function') window.addEventListener('hashchange', function () { revealHash(window.location.hash, true); });
+    page.addEventListener('click', function (e) {
+        var link = e.target && e.target.closest ? e.target.closest('.lq-jump__link') : null;
+        if (link && window.location && link.getAttribute('href') === window.location.hash) revealHash(window.location.hash, true);
+    });
 
     /* An item's button: open the section on the card that holds the fix and put the focus on its button. */
     function goTo(where) {
@@ -1280,7 +1310,7 @@
         var button = page.querySelector(spec[1]);
         if (where === 'log-nightly' && button) button.click();
         if (where === 'bg-restore' && (!button || button.hasAttribute('hidden'))) button = page.querySelector(GOTO['publish-check'][1]);
-        if (card && card.scrollIntoView) card.scrollIntoView({ block: 'start', behavior: 'smooth' });
+        scrollToCard(card);
         if (button) button.focus({ preventScroll: true });
     }
 
@@ -1650,9 +1680,11 @@
     for (var t = 0; t < tabs.length; t++) {
         tabs[t].addEventListener('click', function (e) { selectTab(e.currentTarget); });
         tabs[t].addEventListener('keydown', function (e) {
-            if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
             var list = Array.prototype.slice.call(tabs);
-            var next = list[(list.indexOf(e.currentTarget) + 1) % list.length];
+            var rtl = !(document.documentElement && document.documentElement.getAttribute('dir') === 'ltr');
+            var at = tabStep(e.key, list.indexOf(e.currentTarget), list.length, rtl);
+            if (at === -1) return;
+            var next = list[at];
             next.focus();
             selectTab(next);
             e.preventDefault();

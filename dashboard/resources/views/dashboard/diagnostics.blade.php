@@ -75,6 +75,13 @@
     </section>
     <script type="application/json" id="lq-health-attention-initial">@json($attention)</script>
 
+    {{-- «روح على»: كل كرت بـ«تفاصيل متقدمة» بكبسة وحدة (health.js بيفتح القسم لأي #id جوّاه، بالرابط أو بالكبسة) --}}
+    <x-lq.jump-links class="lq-health__jump" :links="[
+        ['#services', 'الخدمات'], ['#publish-check', 'فحص النشر'], ['#search-ops', 'البحث والتكلفة'],
+        ['#lanes', 'دقة الاقتراحات'], ['#local-index', 'فهرس المتاجر'], ['#logs', 'السجل'],
+        ['#eval-export', 'مجموعة اختبار', true], ['#reprocess', 'إعادة القص', true],
+    ]" />
+
     {{-- «تفاصيل متقدمة»: كل البطاقات المفصّلة متل ما كانت، مسكّرة بالبداية. بطاقة جديدة بتنحط بآخر .lq-health-advanced__body --}}
     <details class="lq-health-advanced" data-health="advanced">
         <summary class="lq-health-advanced__summary">
@@ -179,7 +186,7 @@
 
     @if ($lastRun ?? null)
         {{-- آخر تشغيل (HealthController::lastRunCard من التقرير الذي يكتبه run_report.py بعد كل تشغيل) --}}
-        <section class="lq-card lq-card--compact" aria-label="آخر تشغيل" data-health-last-run>
+        <section class="lq-card lq-card--compact" id="last-run" aria-label="آخر تشغيل" data-health-last-run>
             <p class="lq-card__meta">آخر تشغيل @if ($lastRun['when'] !== '')· <time>{{ $lastRun['when'] }}</time>@endif</p>
             <h2 class="lq-card__title"><span class="lq-dot {{ $healthDots[$lastRun['tone']] ?? 'lq-dot--muted' }}" aria-hidden="true"></span> {{ $lastRun['title'] }}</h2>
             @if ($lastRun['summary'] !== '')<p class="lq-health__footnote">{{ $lastRun['summary'] }}</p>@endif
@@ -187,7 +194,7 @@
     @endif
 
     {{-- «دقة الاقتراحات الحقيقية»: health.js reads /api/system/review-lanes (review_stats.lanes, cached) --}}
-    <section class="lq-card lq-card--compact" aria-label="دقة الاقتراحات الحقيقية">
+    <section class="lq-card lq-card--compact" id="lanes" aria-label="دقة الاقتراحات الحقيقية">
         <h2 class="lq-card__title">دقة الاقتراحات الحقيقية</h2>
         <p class="lq-card__meta">من مراجعاتك للصور اللي اقترحها البحث، حسب نوع الاقتراح.</p>
         <div class="lq-health-lanes" data-health="lanes" aria-busy="true" aria-live="polite">
@@ -198,7 +205,7 @@
     {{-- «فهرس المتاجر المحلي» (LocalIndexController::card; the page script's createLocalIndex): per store the pages in the
          index, when its sitemaps were last read and its status (تمام / ممنوع / ما انجمع أبداً). «حدّث الفهرس هلق» starts the
          background refresh through the bridge and returns at once; the status line shows the progress on reload. --}}
-    <section class="lq-card lq-card--compact" aria-label="فهرس المتاجر المحلي" data-health="index-card">
+    <section class="lq-card lq-card--compact" id="local-index" aria-label="فهرس المتاجر المحلي" data-health="index-card">
         <div class="lq-card__header">
             <h2 class="lq-card__title">فهرس المتاجر المحلي</h2>
             <span class="lq-card__meta">{{ $localIndex['total_text'] }}</span>
@@ -224,7 +231,7 @@
         </div>
     </section>
 
-    <section class="lq-health__search" aria-labelledby="lq-health-search-title">
+    <section class="lq-health__search" id="search-ops" aria-labelledby="lq-health-search-title">
         <div class="lq-health__search-head">
             <h2 class="lq-section-title" id="lq-health-search-title">عمليات البحث</h2>
             <x-lq.segmented label="الفترة" size="sm" value="24h" :options="['24h' => 'آخر 24 ساعة', '7d' => 'آخر 7 أيام']" data-health="window" />
@@ -282,7 +289,7 @@
         <p class="lq-health__footnote" data-health="ops-note"></p>
     </section>
 
-    <section class="lq-card lq-card--dark lq-health-log" aria-labelledby="lq-health-log-title">
+    <section class="lq-card lq-card--dark lq-health-log" id="logs" aria-labelledby="lq-health-log-title">
         <div class="lq-health-log__head">
             <h2 class="lq-card__title" id="lq-health-log-title">السجل</h2>
             <div class="lq-health-log__tabs" role="tablist" aria-label="نوع السجل">
@@ -300,7 +307,7 @@
 
     {{-- «صدّر مجموعة اختبار» (HealthController::exportEvalSet -> cli_bridge eval_export -> scripts/eval_record.py
          --from-db). الزر وحده يشغّله؛ بيرجع وين الملف ورابط تنزيله (health.js createEvalExport). --}}
-    <section class="lq-card lq-card--compact lq-health-eval" aria-labelledby="lq-health-eval-title" data-health="eval-card" data-lq-admin>
+    <section class="lq-card lq-card--compact lq-health-eval" id="eval-export" aria-labelledby="lq-health-eval-title" data-health="eval-card" data-lq-admin>
             <h2 class="lq-card__title" id="lq-health-eval-title">مجموعة اختبار من مراجعاتك</h2>
             <p class="lq-card__meta">بتجمع المنتجات اللي راجعتها (اللي اعتمدتها واللي رفضتها) مع الصور اللي عرضها البحث، بنسخ صغيرة، بملف واحد بتبعته للفريق ليقيسوا دقة البحث على منتجاتك الحقيقية. ما بتعمل أي بحث ولا بتكلّف شي، وما بيطلع فيها أي مفتاح أو بيانات دخول.</p>
             <div class="lq-card__header">
@@ -316,7 +323,7 @@
 
     {{-- «صور قديمة بخلفية بيضا» (RecutController -> cli_bridge reprocess_plan / reprocess_start ->
          scripts/reprocess_transparent.py; health.js createReprocess). «احسب» ما بيغيّر شي؛ «ابدأ» دفعة بسقف. --}}
-    <section class="lq-card lq-card--compact lq-health-reprocess" aria-labelledby="reprocess-title" data-health="reprocess" data-lq-admin>
+    <section class="lq-card lq-card--compact lq-health-reprocess" id="reprocess" aria-labelledby="reprocess-title" data-health="reprocess" data-lq-admin>
         <h2 class="lq-card__title" id="reprocess-title">صور قديمة بخلفية بيضا</h2>
         <p class="lq-card__meta">الصور اللي انتشرت قبل الخلفية الشفافة بتبين مربع أبيض بالوضع الغامق بالتطبيق. «احسب» بيعدّها وبيقلك قديش بتكلّف نعيد قصها شفافة، بدون ما يغيّر شي. الصف اللي غيّرت صورته بإيدك ما منلمسه، وكل صورة بتنعاد بتنسجّل وفيك ترجّعها من «فحص القص».</p>
         <div class="lq-card__header">

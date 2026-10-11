@@ -7,7 +7,8 @@
     round of catalog_match/expand.py, visual search and the barcode policy; it reads no key, it only says whether the
     SerpApi key is saved (the key itself is on the «المفاتيح» tab). It also switches the local catalog index
     (catalog_match/local_index.py) and says what the index holds ($advanced['local_index'] =
-    SettingsController::localIndexStats(), null before scripts/build_catalog_index.py first ran).
+    SettingsController::localIndexStats(), null before scripts/build_catalog_index.py first ran). Building / refreshing it is
+    a link to Health's «حدّث الفهرس هلق» (/system-diagnostics#local-index); the command line stays a developer detail.
 --}}
 @php $adv = $advanced; $src = $advanced['sources']; $spd = $advanced['speed']; $idx = $advanced['local_index'] ?? null; @endphp
 {{-- «السرعة»: section=speed, $advanced['speed'] = SettingsController::speedData(). WORKER_CONCURRENCY, 1..8 (also checked server side). --}}
@@ -21,7 +22,8 @@
 
     <label class="lq-field">
         <span class="lq-field__label">كم منتج بيشتغل بنفس الوقت</span>
-        <input type="number" class="lq-input lq-settings-field__control" name="worker_concurrency" min="{{ \App\Http\Controllers\SettingsController::WORKER_CONCURRENCY_MIN }}" max="{{ \App\Http\Controllers\SettingsController::WORKER_CONCURRENCY_MAX }}" step="1" value="{{ $spd['workers'] }}" dir="ltr" inputmode="numeric" @disabled((bool) $dbError)>
+        <input type="number" class="lq-input lq-settings-field__control" name="worker_concurrency" min="{{ \App\Http\Controllers\SettingsController::WORKER_CONCURRENCY_MIN }}" max="{{ \App\Http\Controllers\SettingsController::WORKER_CONCURRENCY_MAX }}" step="1" value="{{ $spd['workers'] }}" dir="ltr" inputmode="numeric" {{ $fieldAttrs('worker_concurrency') }} @disabled((bool) $dbError)>
+        {{ $fieldError('worker_concurrency') }}
         <span class="lq-field__hint">من 1 لـ {{ \App\Http\Controllers\SettingsController::WORKER_CONCURRENCY_MAX }}، والمعتاد 5. الأعلى أسرع، بس بيستهلك رصيد البحث أسرع. بينطبق من التشغيل الجاي.</span>
     </label>
 
@@ -45,7 +47,8 @@
 
     <label class="lq-field">
         <span class="lq-field__label">حد الطلبات المدفوعة لكل منتج</span>
-        <input type="number" class="lq-input lq-settings-field__control" name="expansion_max_calls" min="0" max="{{ \App\Http\Controllers\SettingsController::EXPANSION_MAX_CALLS_LIMIT }}" step="1" value="{{ $src['max_calls'] }}" dir="ltr" inputmode="numeric" @disabled((bool) $dbError)>
+        <input type="number" class="lq-input lq-settings-field__control" name="expansion_max_calls" min="0" max="{{ \App\Http\Controllers\SettingsController::EXPANSION_MAX_CALLS_LIMIT }}" step="1" value="{{ $src['max_calls'] }}" dir="ltr" inputmode="numeric" {{ $fieldAttrs('expansion_max_calls') }} @disabled((bool) $dbError)>
+        {{ $fieldError('expansion_max_calls') }}
         <span class="lq-field__hint">كل بحث (Serper أو SerpApi) طلب واحد؛ فتح صفحات المتاجر مجاني. 0 = الجولة موقفة.</span>
     </label>
 
@@ -57,41 +60,44 @@
         </div>
         <label class="lq-field">
             <span class="lq-field__label">صفحات بتنقرا لكل منتج</span>
-            <input type="number" class="lq-input lq-settings-field__control" name="local_index_max_pages" min="0" max="{{ \App\Http\Controllers\SettingsController::LOCAL_INDEX_MAX_PAGES_LIMIT }}" step="1" value="{{ $src['local_index_max_pages'] }}" dir="ltr" inputmode="numeric">
+            <input type="number" class="lq-input lq-settings-field__control" name="local_index_max_pages" min="0" max="{{ \App\Http\Controllers\SettingsController::LOCAL_INDEX_MAX_PAGES_LIMIT }}" step="1" value="{{ $src['local_index_max_pages'] }}" dir="ltr" inputmode="numeric" {{ $fieldAttrs('local_index_max_pages') }}>
+            {{ $fieldError('local_index_max_pages') }}
             <span class="lq-field__hint">قراءة الصفحة مجانية، واللي فيها (الصورة والاسم والباركود) بينحفظ 30 يوم. 0 = الفهرس موقف.</span>
         </label>
         @if ($idx === null)
-            <p class="lq-settings-card__note" data-local-index-status>الفهرس لسا ما انبنى، فهو موقف فعلياً. لبنائه من مجلد المشروع: <code dir="ltr">python scripts/build_catalog_index.py --discover</code> للفحص أولاً، وبعدها نفس الأمر بدون <code dir="ltr">--discover</code>.</p>
+            <p class="lq-settings-card__note" data-local-index-status>الفهرس لسا ما انبنى، فهو موقف فعلياً. ابنيه بزر «حدّث الفهرس هلق» من <a class="lq-link" href="{{ route('dashboard.diagnostics') }}#local-index">الصحة › فهرس المتاجر المحلي</a>. <span class="lq-settings-card__tech">للمطوّر: <code dir="ltr">python scripts/build_catalog_index.py --discover</code> بيفحص خرايط المتاجر بدون ما يكتب شي.</span></p>
         @else
-            <p class="lq-settings-card__note" data-local-index-status>بالفهرس {{ number_format($idx['products']) }} صفحة منتج من {{ count($idx['stores']) }} متجر ({{ implode('، ', array_keys($idx['stores'])) }})@if ($idx['last']) · آخر تحديث <span dir="ltr">{{ $idx['last'] }}</span>@endif. للتحديث: <code dir="ltr">python scripts/build_catalog_index.py</code></p>
+            <p class="lq-settings-card__note" data-local-index-status>بالفهرس {{ number_format($idx['products']) }} صفحة منتج من {{ count($idx['stores']) }} متجر ({{ implode('، ', array_keys($idx['stores'])) }})@if ($idx['last']) · آخر تحديث <span dir="ltr">{{ $idx['last'] }}</span>@endif. بيتحدّث لحاله إذا صار أقدم من أسبوع، أو هلق بزر «حدّث الفهرس هلق» من <a class="lq-link" href="{{ route('dashboard.diagnostics') }}#local-index">الصحة › فهرس المتاجر المحلي</a>.</p>
         @endif
     </fieldset>
 
     <fieldset class="lq-settings-fieldset lq-settings-fieldset--boxed" @disabled((bool) $dbError)>
         <legend class="lq-field__label">البحث بالصورة</legend>
         <label class="lq-check lq-settings-choice">
-            <input type="radio" name="visual_search" value="auto" @checked($src['visual'] === 'auto')>
+            <input type="radio" name="visual_search" value="auto" @checked($src['visual'] === 'auto') {{ $fieldAttrs('visual_search') }}>
             <span>تلقائي: Serper أولاً، وSerpApi (Google Lens) إذا مفتاحه محفوظ (موصى به)</span>
         </label>
         <label class="lq-check lq-settings-choice">
-            <input type="radio" name="visual_search" value="serper" @checked($src['visual'] === 'serper')>
+            <input type="radio" name="visual_search" value="serper" @checked($src['visual'] === 'serper') {{ $fieldAttrs('visual_search') }}>
             <span>Serper بس: الأرخص، إذا خطتك بتدعم البحث بالصورة</span>
         </label>
         <label class="lq-check lq-settings-choice">
-            <input type="radio" name="visual_search" value="serpapi" @checked($src['visual'] === 'serpapi')>
+            <input type="radio" name="visual_search" value="serpapi" @checked($src['visual'] === 'serpapi') {{ $fieldAttrs('visual_search') }}>
             <span>SerpApi بس: Google Lens، أدق بالصور الكبيرة وأغلى</span>
         </label>
         <label class="lq-check lq-settings-choice">
-            <input type="radio" name="visual_search" value="off" @checked($src['visual'] === 'off')>
+            <input type="radio" name="visual_search" value="off" @checked($src['visual'] === 'off') {{ $fieldAttrs('visual_search') }}>
             <span>موقف: بلا بحث بالصورة</span>
         </label>
+        {{ $fieldError('visual_search') }}
         <p class="lq-settings-card__note" data-serpapi-key>مفتاح SerpApi: {{ $src['serpapi_saved'] ? 'محفوظ' : 'غير محفوظ' }} · بيتضاف من تبويب <a class="lq-link" href="{{ route('dashboard.settings') }}?tab=keys">المفاتيح</a>.</p>
         @if ($src['visual'] === 'serpapi' && !$src['serpapi_saved'])
             <x-lq.alert variant="warning" title="مفتاح SerpApi مش محفوظ:">البحث بالصورة موقف فعلياً لحد ما تضيف المفتاح، أو تختار «تلقائي».</x-lq.alert>
         @endif
         <label class="lq-field">
             <span class="lq-field__label">سعر بحث SerpApi الواحد (دولار)</span>
-            <input type="number" class="lq-input lq-settings-field__control" name="serpapi_lens_price_usd" min="0" max="1" step="0.001" value="{{ $src['serpapi_price'] }}" dir="ltr" inputmode="decimal">
+            <input type="number" class="lq-input lq-settings-field__control" name="serpapi_lens_price_usd" min="0" max="1" step="0.001" value="{{ $src['serpapi_price'] }}" dir="ltr" inputmode="decimal" {{ $fieldAttrs('serpapi_lens_price_usd') }}>
+            {{ $fieldError('serpapi_lens_price_usd') }}
             <span class="lq-field__hint">تقديري، للتكلفة بصفحة الصحة. عدّله حسب خطتك. ما بينطلب أكتر من بحث SerpApi واحد لكل منتج.</span>
         </label>
     </fieldset>
@@ -99,17 +105,18 @@
     <fieldset class="lq-settings-fieldset lq-settings-fieldset--boxed" @disabled((bool) $dbError)>
         <legend class="lq-field__label">الباركود</legend>
         <label class="lq-check lq-settings-choice">
-            <input type="radio" name="gtin_policy" value="evidence" @checked($src['gtin_policy'] === 'evidence')>
+            <input type="radio" name="gtin_policy" value="evidence" @checked($src['gtin_policy'] === 'evidence') {{ $fieldAttrs('gtin_policy') }}>
             <span>دليل مساعد (موصى به): بيقوّي الصورة بس إذا الماركة متطابقة؛ وإذا اختلف، الصورة بتحتاج تطابق كامل بالماركة والاسم والحجم، وبتوصلك للمراجعة مع تنبيه إن الباركود مختلف. مناسب لأن باركود الشيت ممكن يكون غلط.</span>
         </label>
         <label class="lq-check lq-settings-choice">
-            <input type="radio" name="gtin_policy" value="strict" @checked($src['gtin_policy'] === 'strict')>
+            <input type="radio" name="gtin_policy" value="strict" @checked($src['gtin_policy'] === 'strict') {{ $fieldAttrs('gtin_policy') }}>
             <span>صارم: صفحة بباركود مختلف بتنرفض. استعمله بس إذا باركودات الشيت مضمونة.</span>
         </label>
         <label class="lq-check lq-settings-choice">
-            <input type="radio" name="gtin_policy" value="off" @checked($src['gtin_policy'] === 'off')>
+            <input type="radio" name="gtin_policy" value="off" @checked($src['gtin_policy'] === 'off') {{ $fieldAttrs('gtin_policy') }}>
             <span>تجاهل الباركود: الماركة والاسم والحجم بس.</span>
         </label>
+        {{ $fieldError('gtin_policy') }}
     </fieldset>
 
     <div class="lq-settings-card__actions">

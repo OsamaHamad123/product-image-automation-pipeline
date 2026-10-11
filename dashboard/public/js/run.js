@@ -15,27 +15,29 @@
     var POLL_ACTIVE_MS = 4000;
     var POLL_IDLE_MS = 8000;
 
-    // No silent destructive button: each confirmation says what happens and what is kept.
-    var STOP_CONFIRM_TEXT = 'إيقاف التشغيل:\n' +
-        '• العامل بيكمّل المنتجات اللي بإيده وبعدين بيوقف وبيكتب تقرير التشغيل (إذا ما وقف خلال دقيقة ونص منوقفه). وإذا لسا عم يقرأ الشيت، بيوقف قبل ما يدوّر على أي منتج.\n' +
-        '• الصفوف اللي كانت عم تتعالج بترجع تستنى، وبتتعالج بالتشغيل الجاي.\n' +
-        '• ما في ولا صف بينمسح: الجاهز للمراجعة والمعتمد والفاشل بيضلّوا متل ما هنّي.\n\n' +
-        'بدك توقف التشغيل؟';
+    // No silent destructive button: each question (Laqta.ask) says in a sentence or two what happens and what is kept.
+    var STOP_CONFIRM_TEXT = {
+        title: 'نوقف التشغيل؟',
+        text: 'العامل بيخلّص اللي بإيده وبيوقف، والصفوف اللي كانت عم تتعالج بترجع تستنى للتشغيل الجاي. ' +
+            'ما في ولا صف بينمسح، والمنشور ما بينلمس.',
+        confirmText: 'وقّف',
+        danger: true
+    };
 
-    var RESET_CONFIRM_TEXT = 'إصلاح تشغيل عالق (استعمله بس إذا التشغيل عالق أو ضلّ عطل قديم ظاهر):\n' +
-        '• بيوقف أي عامل لسا شغّال بالخلفية بعد ما يكمّل المنتجات اللي بإيده (إذا ما وقف خلال دقيقة ونص منوقفه).\n' +
-        '• بيمسح ملف القفل وعدادات التقدم والتنبيه، وبيلغي الإيقاف المؤقت.\n' +
-        '• الصفوف العالقة بـ «عم تتعالج» بترجع تستنى.\n' +
-        '• بنقرأ قائمة المنتجات من الشيت من جديد.\n' +
-        '• ما في ولا منتج جاهز للمراجعة أو معتمد أو فاشل بينمسح، ولا أي اقتراح أو قرار مراجعة.\n\n' +
-        'بدك تكمّل؟';
+    var RESET_CONFIRM_TEXT = {
+        title: 'نصلّح التشغيل العالق؟',
+        text: 'منوقف أي عامل عالق ومنمسح القفل والعدادات، والصفوف العالقة بترجع تستنى. ' +
+            'ما في ولا منتج جاهز للمراجعة أو معتمد أو فاشل بينمسح، ولا أي اقتراح أو قرار مراجعة.',
+        confirmText: 'صلّح',
+        danger: true
+    };
 
-    var FORCE_CONFIRM_TEXT = 'إعادة البحث حتى للمنتجات اللي إلها صورة:\n' +
-        '• منبحث من جديد عن كل منتجات النطاق، حتى اللي إلها صورة نهائية أو بانتظار مراجعتك.\n' +
-        '• اقتراحات المنتجات اللي بانتظار المراجعة بتتبدّل بنتائج البحث الجديد.\n' +
-        '• الصور المنشورة بالشيت بتضل مكانها لحد ما تعتمد غيرها (أو ينشر النشر الآلي صورة مؤكدة لماركتها)، ' +
-        'وما بينكتب أبداً فوق صورة اعتمدها مراجع.\n\n' +
-        'بدك تبدأ؟';
+    var FORCE_CONFIRM_TEXT = {
+        title: 'نبحث من جديد حتى للي إلها صورة؟',
+        text: 'اقتراحات اللي بانتظار المراجعة بتتبدّل بالنتائج الجديدة. ' +
+            'الصور المنشورة بتضل مكانها لحد ما تنعتمد غيرها، وما بينكتب أبداً فوق صورة اعتمدها مراجع.',
+        confirmText: 'ابدأ'
+    };
 
     // «راجع النتائج» و«راجع الجاهز هلق»: قائمة المراجعة بوضع الجملة (الصور الجاهزة مع بعض)
     var REVIEW_HREF = '/catalog?mode=bulk';
@@ -214,6 +216,22 @@
         if (form.force) parts.push('force=1');
         if (fresh) parts.push('refresh=1');
         return parts.join('&');
+    }
+
+    /* The form a link asks for (?scope=rows&rows=… or ?scope=brand&brand=…), or null for the usual «كل الشيت». */
+    function linkedForm(search) {
+        var params;
+        try {
+            params = new URLSearchParams(String(search || ''));
+        } catch (e) {
+            return null;
+        }
+        var scope = params.get('scope');
+        var rows = C.normalizeRows(params.get('rows') || '').slice(0, 2000);
+        var brand = String(params.get('brand') || '').trim().slice(0, 120);
+        if (scope === 'rows' && /^[0-9][0-9 ,-]*$/.test(rows)) return { scope: 'rows', rows: rows, brand: '' };
+        if (scope === 'brand' && brand) return { scope: 'brand', rows: '', brand: brand };
+        return null;
     }
 
     function has(n) {
@@ -559,7 +577,7 @@
 
     /*
      * deps: fetchJson(url, opts) -> Promise<{ok,status,data}>, renderLive(view), renderPlan(view), renderStart(view),
-     * confirm(text) -> bool, toast(text, variant), now() -> epoch seconds, schedule(fn, ms) -> handle,
+     * confirm(question) -> bool, toast(text, variant), now() -> epoch seconds, schedule(fn, ms) -> handle,
      * hidden() -> true while the tab is hidden (optional).
      */
     function createController(deps) {
@@ -1327,7 +1345,10 @@
         }
 
         function searchBulkSites() {
-            if (!root.confirm(BULK_SITES_CONFIRM_TEXT)) return Promise.resolve();
+            return C.ask(BULK_SITES_CONFIRM_TEXT).then(function (ok) { if (ok) return runBulkSites(); });
+        }
+
+        function runBulkSites() {
             bulkNote('');
             var btn = $('bulk-sites');
             btn.disabled = true;
@@ -1362,9 +1383,11 @@
         }
 
         function undoBrand(brand, line, btn) {
-            if (!root.confirm('رح نشيل «' + brand + '» من Brands Mapping، بس إذا صفها لسا متل ما كتبناه. بدك تكمّل؟')) {
-                return Promise.resolve();
-            }
+            return C.ask('رح نشيل «' + brand + '» من جدول الماركات، بس إذا صفها لسا متل ما كتبناه. بدك تكمّل؟')
+                .then(function (ok) { if (ok) return removeBrand(brand, line, btn); });
+        }
+
+        function removeBrand(brand, line, btn) {
             btn.disabled = true;
             bulkNote('');
             return C.fetchJson('/api/run/brand-undo', { method: 'POST', body: { brand: brand } }).then(function (res) {
@@ -1383,7 +1406,10 @@
         function approveBulk() {
             var body = bulkApproveBody(bulkRows);
             if (!body.brands.length) return Promise.resolve();
-            if (!root.confirm(bulkConfirmText(body.brands.length))) return Promise.resolve();
+            return C.ask(bulkConfirmText(body.brands.length)).then(function (ok) { if (ok) return addBulk(body); });
+        }
+
+        function addBulk(body) {
             bulkNote('');
             var btn = $('bulk-approve');
             btn.disabled = true;
@@ -1556,7 +1582,11 @@
             renderLive: renderLive,
             renderPlan: renderPlan,
             renderStart: renderStart,
-            confirm: function (text) { return C.ask(text); },
+            // a question {title, text, …}: without the layout's Laqta.ask, window.confirm gets it as plain text
+            confirm: function (q) {
+                var asks = root.Laqta && typeof root.Laqta.ask === 'function';
+                return C.ask(asks || typeof q === 'string' ? q : q.title + '\n' + q.text);
+            },
             toast: C.toast,
             now: function () { return Date.now() / 1000; },
             schedule: function (fn, ms) { return root.setTimeout(fn, ms); },
@@ -1618,6 +1648,28 @@
         $('barcodes-write').addEventListener('click', function () { writeBarcodes(); });
         $('export').addEventListener('click', function () { exportRun(); });
 
+        // ?scope=rows&rows=12,15 (or ?scope=brand&brand=X): a link from elsewhere («رجّع وشغّل» in the review list) opens
+        // the form on that scope, so «قبل ما تبدأ» prices exactly those rows and one click starts them
+        var linked = linkedForm(root.location && root.location.search);
+        if (linked) {
+            controller.state.form.scope = linked.scope;
+            controller.state.form.rows = linked.rows;
+            controller.state.form.brand = linked.brand;
+            var items = page.querySelectorAll('[data-run="scope"] .lq-segmented__item');
+            for (var si = 0; si < items.length; si++) {
+                items[si].setAttribute('aria-pressed', items[si].getAttribute('data-value') === linked.scope ? 'true' : 'false');
+            }
+            C.setHidden($('brand-field'), linked.scope !== 'brand');
+            C.setHidden($('rows-field'), linked.scope !== 'rows');
+            if (linked.scope === 'rows') $('rows').value = linked.rows;
+            if (linked.scope === 'brand') {
+                var pick = C.el(doc, 'option', null, linked.brand);
+                pick.value = linked.brand;
+                $('brand').appendChild(pick);
+                $('brand').value = linked.brand;
+            }
+        }
+
         var initial = null;
         var island = doc.getElementById('lq-run-initial');
         try {
@@ -1667,6 +1719,7 @@
         exportQuery: exportQuery,
         exportFileName: exportFileName,
         planQuery: planQuery,
+        linkedForm: linkedForm,
         runBody: runBody,
         createController: createController,
         mount: mount

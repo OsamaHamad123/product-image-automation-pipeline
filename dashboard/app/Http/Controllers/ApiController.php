@@ -183,7 +183,8 @@ class ApiController extends Controller
     {
         try {
             $rows = DB::table('approval_jobs')
-                ->select('id', 'sku_key', 'row_number', 'label', 'created_by', 'finished_at', 'result_json', 'http_status')
+                ->select('id', 'sku_key', 'row_number', 'label', 'created_by', 'finished_at', 'result_json', 'http_status',
+                         'params_json')
                 ->whereRaw(self::FAILED_OPEN_SQL)
                 ->orderByDesc('finished_at')->orderByDesc('id')
                 ->limit(50)->get();
@@ -201,9 +202,29 @@ class ApiController extends Controller
                        'http_status' => (int) ($r->http_status ?: 500),
                        'error' => isset($result['error']) && is_scalar($result['error']) ? (string) $result['error'] : null,
                        'error_code' => isset($result['error_code']) && is_scalar($result['error_code']) ? (string) $result['error_code'] : null,
-                       'quality_flags' => is_array($flags) ? array_values(array_filter($flags, 'is_string')) : []];
+                       'reason' => isset($result['reason']) && is_scalar($result['reason']) ? (string) $result['reason'] : null,
+                       'quality_flags' => is_array($flags) ? array_values(array_filter($flags, 'is_string')) : [],
+                       'retry' => self::retryBody((string) $r->params_json)];
         }
         return response()->json(['status' => 'success', 'jobs' => $jobs])->header('Cache-Control', 'no-store');
+    }
+
+    /**
+     * «أعد المحاولة» بـ«اعتمادات ما زبطت»: الطلب كما انبعت أول مرة (نفس الصورة ونفس هوية المنتج و expected_state اللي
+     * شافه المراجع وقتها)، بنفس قائمة selectImage الصريحة. لا replace ولا publish_anyway: هدول تأكيد صريح بالصفحة، مش
+     * إعادة. null لما ما في صورة (طلب قديم أو تالف): الزر ما بيطلع
+     */
+    private static function retryBody(string $paramsJson): ?array
+    {
+        $params = json_decode($paramsJson, true);
+        if (!is_array($params) || !isset($params['image_url']) || !is_string($params['image_url']) || $params['image_url'] === '') {
+            return null;
+        }
+        $body = array_intersect_key($params, array_flip(self::SELECT_FIELDS));
+        if (isset($params['expected_state']) && is_array($params['expected_state'])) {
+            $body['expected_state'] = array_intersect_key($params['expected_state'], array_flip(self::EXPECTED_STATE_FIELDS));
+        }
+        return $body;
     }
 
     /** POST /api/approval-jobs/{id}/dismiss : «تجاهل» اعتماد فشل. */

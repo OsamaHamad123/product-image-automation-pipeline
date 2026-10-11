@@ -445,6 +445,9 @@
                 <a class="lq-segmented__item" href="{{ route('dashboard.catalog') }}">منتج واحد</a>
                 <a class="lq-segmented__item" href="#kit-forms" aria-current="page">بالجملة</a>
             </nav>
+
+            <h3 class="kit-sub">روح على (روابط لكروت الصفحة)</h3>
+            <x-lq.jump-links :links="[['#kit-forms', 'النماذج'], ['#kit-forms', 'للمدير بس', true]]" />
         </x-lq.card>
     </div>
 

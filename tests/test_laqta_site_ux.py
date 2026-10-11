@@ -305,7 +305,7 @@ console.log(JSON.stringify({ api: Object.keys(window.Laqta).sort(), events: docL
 """)
     assert out["api"] == sorted(["normalizeRunStatus", "describeRunStatus", "plainNotice", "refreshRunStatus",
                                  "sessionExpired", "sessionRestored", "lastRunStatus", "onRunStatus", "toast", "ask",
-                                 "runNotice"])
+                                 "runNotice", "closeAccount"])
     js = read(LAYOUT_JS)
     for hook in ("'lq:run-status'", "'lq:change'", "lqSessionExpired", "data-lq-session-pending", "data-lq-approvals",
                  "data-lq-confirm", "data-lq-review-url", "data-lq-status-url"):

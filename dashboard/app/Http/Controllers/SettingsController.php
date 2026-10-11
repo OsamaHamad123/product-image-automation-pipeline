@@ -223,6 +223,8 @@ class SettingsController extends Controller
                 'error' => session('error'),
                 'warnings' => (array) session('warnings', []),
             ],
+            // the same warnings next to their field (setting name => message, save/saveModels): aria-invalid + the message
+            'fieldErrors' => array_filter((array) session('field_errors', []), 'is_string'),
         ];
 
         // without the database nothing but the sheet tab can be read truthfully: the page says so instead
@@ -281,6 +283,7 @@ class SettingsController extends Controller
         }
         $tab = $spec['tab'];
         $warnings = [];
+        $fieldErrors = [];   // نفس التحذير جنب حقله (اسم الإعداد => الرسالة): الصفحة بتعلّم الحقل وبتحط المؤشر فيه
 
         try {
             $changes = [];
@@ -300,7 +303,7 @@ class SettingsController extends Controller
             foreach ($spec['text'] ?? [] as $k) {
                 $val = self::field($request, $k);
                 if ($k === 'gemini_model' && !array_key_exists($val, ProductController::SUPPORTED_GEMINI_MODELS)) {
-                    $warnings[] = "نموذج Gemini '{$val}' غير مدعوم؛ لم يتم تغيير النموذج المحفوظ.";
+                    $warnings[] = $fieldErrors[$k] = "نموذج Gemini '{$val}' غير مدعوم؛ لم يتم تغيير النموذج المحفوظ.";
                     continue;
                 }
                 if ($k === 'auto_publish_brands') {
@@ -308,7 +311,7 @@ class SettingsController extends Controller
                 }
                 if ($k === 'output_canvas_size') {
                     if (!preg_match('/^\d{3,4}$/', $val) || (int) $val < self::CANVAS_MIN || (int) $val > self::CANVAS_MAX) {
-                        $warnings[] = 'مقاس الصورة لازم يكون رقم بين ' . self::CANVAS_MIN . ' و' . self::CANVAS_MAX
+                        $warnings[] = $fieldErrors[$k] = 'مقاس الصورة لازم يكون رقم بين ' . self::CANVAS_MIN . ' و' . self::CANVAS_MAX
                             . ' بكسل؛ ما تغيّر المقاس المحفوظ.';
                         continue;
                     }
@@ -316,7 +319,7 @@ class SettingsController extends Controller
                 }
                 if ($k === 'expansion_max_calls') {
                     if (!preg_match('/^\d{1,2}$/', $val) || (int) $val > self::EXPANSION_MAX_CALLS_LIMIT) {
-                        $warnings[] = 'عدد الطلبات الإضافية لازم يكون رقم من 0 لـ ' . self::EXPANSION_MAX_CALLS_LIMIT
+                        $warnings[] = $fieldErrors[$k] = 'عدد الطلبات الإضافية لازم يكون رقم من 0 لـ ' . self::EXPANSION_MAX_CALLS_LIMIT
                             . '؛ ما تغيّر الرقم المحفوظ.';
                         continue;
                     }
@@ -328,7 +331,7 @@ class SettingsController extends Controller
                     }
                     if (!preg_match('/^\d{1,2}$/', $val) || (int) $val < self::WORKER_CONCURRENCY_MIN
                         || (int) $val > self::WORKER_CONCURRENCY_MAX) {
-                        $warnings[] = 'عدد المنتجات بنفس الوقت لازم يكون رقم من ' . self::WORKER_CONCURRENCY_MIN . ' لـ '
+                        $warnings[] = $fieldErrors[$k] = 'عدد المنتجات بنفس الوقت لازم يكون رقم من ' . self::WORKER_CONCURRENCY_MIN . ' لـ '
                             . self::WORKER_CONCURRENCY_MAX . '؛ ما تغيّر الرقم المحفوظ.';
                         continue;
                     }
@@ -339,14 +342,14 @@ class SettingsController extends Controller
                         continue;   // حقل غايب (نموذج أقدم): الرقم المحفوظ بيضل
                     }
                     if (!preg_match('/^\d{1,2}$/', $val) || (int) $val > self::LOCAL_INDEX_MAX_PAGES_LIMIT) {
-                        $warnings[] = 'عدد صفحات الفهرس المحلي لازم يكون رقم من 0 لـ ' . self::LOCAL_INDEX_MAX_PAGES_LIMIT
+                        $warnings[] = $fieldErrors[$k] = 'عدد صفحات الفهرس المحلي لازم يكون رقم من 0 لـ ' . self::LOCAL_INDEX_MAX_PAGES_LIMIT
                             . '؛ ما تغيّر الرقم المحفوظ.';
                         continue;
                     }
                     $val = (string) (int) $val;
                 }
                 if ($k === 'visual_search' && !in_array($val, self::VISUAL_SEARCH_MODES, true)) {
-                    $warnings[] = 'طريقة البحث المرئي هاي مش مدعومة؛ ما تغيّرت المحفوظة.';
+                    $warnings[] = $fieldErrors[$k] = 'طريقة البحث المرئي هاي مش مدعومة؛ ما تغيّرت المحفوظة.';
                     continue;
                 }
                 if ($k === 'serpapi_lens_price_usd') {
@@ -354,13 +357,13 @@ class SettingsController extends Controller
                         continue;
                     }
                     if (!is_numeric($val) || (float) $val < 0 || (float) $val > 1) {
-                        $warnings[] = 'سعر بحث SerpApi لازم يكون رقم بين 0 و1 دولار؛ ما تغيّر السعر المحفوظ.';
+                        $warnings[] = $fieldErrors[$k] = 'سعر بحث SerpApi لازم يكون رقم بين 0 و1 دولار؛ ما تغيّر السعر المحفوظ.';
                         continue;
                     }
                     $val = (string) (float) $val;
                 }
                 if ($k === 'gtin_policy' && !in_array($val, self::GTIN_POLICIES, true)) {
-                    $warnings[] = 'سياسة الباركود هاي مش مدعومة؛ ما تغيّرت المحفوظة.';
+                    $warnings[] = $fieldErrors[$k] = 'سياسة الباركود هاي مش مدعومة؛ ما تغيّرت المحفوظة.';
                     continue;
                 }
                 if ($k === 'output_background') {
@@ -368,12 +371,12 @@ class SettingsController extends Controller
                         continue;   // حقل غايب (نموذج أقدم): الخلفية المحفوظة بتضل
                     }
                     if (!array_key_exists($val, self::OUTPUT_BACKGROUNDS)) {
-                        $warnings[] = 'خلفية الصورة هاي مش مدعومة؛ ما تغيّرت المحفوظة.';
+                        $warnings[] = $fieldErrors[$k] = 'خلفية الصورة هاي مش مدعومة؛ ما تغيّرت المحفوظة.';
                         continue;
                     }
                 }
                 if ($k === 'bg_removal_method' && !in_array($val, self::BG_METHODS, true)) {
-                    $warnings[] = 'طريقة عزل الخلفية هاي مش مدعومة؛ ما تغيّرت الطريقة المحفوظة.';
+                    $warnings[] = $fieldErrors[$k] = 'طريقة عزل الخلفية هاي مش مدعومة؛ ما تغيّرت الطريقة المحفوظة.';
                     continue;
                 }
                 $changes[$k] = $val;
@@ -407,7 +410,7 @@ class SettingsController extends Controller
                         self::strictLaneOn($current[self::STRICT_LANE_KEY] ?? null));
                     if ($why !== null) {
                         $changes['auto_publish_enabled'] = 'false';
-                        $warnings[] = $why;
+                        $warnings[] = $fieldErrors['auto_publish_enabled'] = $why;
                     }
                 }
             }
@@ -415,7 +418,7 @@ class SettingsController extends Controller
             self::write($changes);
 
             $message = self::savedMessage($section, $changes);
-            return self::back($tab, ['success' => $message, 'warnings' => $warnings]);
+            return self::back($tab, ['success' => $message, 'warnings' => $warnings, 'field_errors' => $fieldErrors]);
         } catch (\Throwable $e) {
             return self::back($tab, ['error' => 'ما انحفظت الإعدادات: قاعدة البيانات ما ردّت. جرّب كمان شوي.']);
         }
@@ -1389,6 +1392,7 @@ class SettingsController extends Controller
     private function saveModels(Request $request)
     {
         $warnings = [];
+        $fieldErrors = [];   // اسم الحقل => الرسالة (متل save)
         $changes = [];
         $primary = strtolower(self::field($request, 'verifier_primary'));
         if (isset(self::VERIFIER_MODELS[$primary])) {
@@ -1397,13 +1401,13 @@ class SettingsController extends Controller
                 $changes['gemini_model'] = substr($primary, strlen('gemini:'));
             }
         } else {
-            $warnings[] = 'النموذج الأساسي اللي اخترته مش من القائمة المدعومة؛ ما تغيّر.';
+            $warnings[] = $fieldErrors['verifier_primary'] = 'النموذج الأساسي اللي اخترته مش من القائمة المدعومة؛ ما تغيّر.';
         }
         $strong = strtolower(self::field($request, 'verifier_strong'));
         if ($strong === 'off' || isset(self::VERIFIER_MODELS[$strong])) {
             $changes['verifier_strong'] = $strong;
         } else {
-            $warnings[] = 'النموذج القوي اللي اخترته مش من القائمة المدعومة؛ ما تغيّر.';
+            $warnings[] = $fieldErrors['verifier_strong'] = 'النموذج القوي اللي اخترته مش من القائمة المدعومة؛ ما تغيّر.';
         }
         // قارئ أسماء الشيت: gemini أو off بس؛ نموذج قديم بلا هالحقل ما بيغيّره
         $normalizer = $request->input('query_normalizer');
@@ -1412,34 +1416,41 @@ class SettingsController extends Controller
             if (in_array($normalizer, self::QUERY_NORMALIZER_MODES, true)) {
                 $changes['query_normalizer'] = $normalizer;
             } else {
-                $warnings[] = 'اختيار قراءة الأسماء المختصرة مش مفهوم؛ ما تغيّر.';
+                $warnings[] = $fieldErrors['query_normalizer'] = 'اختيار قراءة الأسماء المختصرة مش مفهوم؛ ما تغيّر.';
             }
         }
         $budget = self::field($request, 'verifier_monthly_budget_usd');
         if (preg_match('/^\d{1,4}(\.\d{1,2})?$/', $budget) && (float) $budget <= self::VERIFIER_BUDGET_MAX) {
             $changes['verifier_monthly_budget_usd'] = self::plainNumber((float) $budget);
         } else {
-            $warnings[] = 'الميزانية لازم تكون رقم بين 0 و' . self::VERIFIER_BUDGET_MAX . ' دولار؛ ما تغيّرت الميزانية.';
+            $warnings[] = $fieldErrors['verifier_monthly_budget_usd'] = 'الميزانية لازم تكون رقم بين 0 و' . self::VERIFIER_BUDGET_MAX . ' دولار؛ ما تغيّرت الميزانية.';
         }
         $in = $request->input('price_input');
         $out = $request->input('price_output');
         if (is_array($in) || is_array($out)) {
             $prices = [];
+            $bad = [];
             $valid = is_array($in) && is_array($out);
             foreach (self::VERIFIER_MODELS as $id => $m) {
                 $slug = self::modelSlug($id);
                 $pi = $valid && is_scalar($in[$slug] ?? null) ? trim((string) $in[$slug]) : null;
                 $po = $valid && is_scalar($out[$slug] ?? null) ? trim((string) $out[$slug]) : null;
-                if (!self::validPrice($pi) || !self::validPrice($po)) {
-                    $valid = false;
-                    break;
+                // كل خانة غلط بتتعلّم لحالها (price_input.<slug>)، والرسالة وحدة تحت الجدول (model_prices)
+                foreach (['price_input' => $pi, 'price_output' => $po] as $name => $price) {
+                    if (!self::validPrice($price)) {
+                        $valid = false;
+                        $bad[] = $name . '.' . $slug;
+                    }
                 }
                 $prices[$id] = ['input' => round((float) $pi, 4), 'output' => round((float) $po, 4)];
             }
             if ($valid) {
                 $changes['model_prices'] = json_encode($prices, JSON_UNESCAPED_SLASHES);
             } else {
-                $warnings[] = 'الأسعار لازم تكون أرقام بين 0 و' . self::VERIFIER_PRICE_MAX . '؛ ما تغيّرت الأسعار.';
+                $warnings[] = $fieldErrors['model_prices'] = 'الأسعار لازم تكون أرقام بين 0 و' . self::VERIFIER_PRICE_MAX . '؛ ما تغيّرت الأسعار.';
+                foreach ($bad as $name) {
+                    $fieldErrors[$name] = $fieldErrors['model_prices'];
+                }
             }
         }
 
@@ -1449,7 +1460,7 @@ class SettingsController extends Controller
             return self::back('models', ['error' => 'ما انحفظت الإعدادات: قاعدة البيانات ما ردّت. جرّب كمان شوي.']);
         }
         $message = $changes === [] ? 'ما تغيّر شي.' : 'انحفظت نماذج التحقق، وبتنطبق من البحث الجاي.';
-        return self::back('models', ['success' => $message, 'warnings' => $warnings]);
+        return self::back('models', ['success' => $message, 'warnings' => $warnings, 'field_errors' => $fieldErrors]);
     }
 
     // ------------------------------------------------------------------

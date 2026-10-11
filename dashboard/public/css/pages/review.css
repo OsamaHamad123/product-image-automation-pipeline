@@ -278,6 +278,7 @@
     font-weight: 600;
 }
 
+.rv-failed__retry,
 .rv-failed__open,
 .rv-failed__dismiss {
     white-space: nowrap;
@@ -322,6 +323,7 @@
 
 .rv-failed__actions {
     display: flex;
+    flex-wrap: wrap;
     gap: 4px;
     flex-shrink: 0;
 }
@@ -2905,4 +2907,48 @@ body.rv-lb-open {
     .rv-queue {
         display: none;
     }
+}
+
+/* Touch screens: reject reasons, the theme toggle and the jobs close button reach 44px (they are 28–34px for the mouse) */
+@media (pointer: coarse) {
+    .lq-body .rv-reason,
+    .lq-body .rv-reason-chip {
+        height: auto;
+        min-height: 44px;
+    }
+
+    .lq-body .rv-theme__btn {
+        min-height: 44px;
+    }
+
+    .lq-body .rv-jobs__close {
+        width: 44px;
+        height: 44px;
+    }
+}
+
+/* the search box above the bulk cards */
+.rv-bulk__search {
+    flex: 1 1 220px;
+    max-width: 320px;
+}
+
+/* «?» beside the list title: the shortcuts list without knowing the «?» key */
+.rv-keys-btn {
+    font-weight: 700;
+}
+
+/* -------------------------------------------------------------------------------------------------
+ * Bulk mode: held rejects (bulk.js rejectList / relabelUndo)
+ * Appended block: kept together at the end of the file to ease merging.
+ * ------------------------------------------------------------------------------------------------- */
+
+/* «رفضت …» in the undo box: the x instead of the check */
+.rv-undo__row.is-reject .rv-undo__ok {
+    color: var(--lq-danger-on-dark);
+}
+
+/* a card whose reject is held for «تراجع» */
+.rv-card__overlay.is-held.is-reject {
+    color: var(--lq-danger-text);
 }

@@ -32,21 +32,23 @@
 
     <label class="lq-field">
         <span class="lq-field__label">مقاس الصورة النهائية</span>
-        <select name="output_canvas_size" class="lq-select lq-settings-field__control" @disabled((bool) $dbError)>
+        <select name="output_canvas_size" class="lq-select lq-settings-field__control" {{ $fieldAttrs('output_canvas_size') }} @disabled((bool) $dbError)>
             @foreach ($pr['sizes'] as $size)
                 <option value="{{ $size }}" @selected($size === $pr['size'])>{{ $size }} × {{ $size }} بكسل{{ $size === 800 ? ' (الافتراضي)' : '' }}</option>
             @endforeach
         </select>
+        {{ $fieldError('output_canvas_size') }}
         <span class="lq-field__hint">لوحة مربعة، والمنتج كامل بيعبّي 88% منها بالنص. هاد أصغر مقاس: إذا الصورة الأصلية كبيرة ومفصّلة بتنتشر أكبر (لحد 2048 بكسل) لتبين حادة على شاشة الموبايل.</span>
     </label>
 
     <label class="lq-field">
         <span class="lq-field__label">خلفية الصورة</span>
-        <select name="output_background" class="lq-select lq-settings-field__control" @disabled((bool) $dbError)>
+        <select name="output_background" class="lq-select lq-settings-field__control" {{ $fieldAttrs('output_background') }} @disabled((bool) $dbError)>
             @foreach ($pr['backgrounds'] as $value => $label)
                 <option value="{{ $value }}" @selected($pr['background'] === $value)>{{ $label }}</option>
             @endforeach
         </select>
+        {{ $fieldError('output_background') }}
         <span class="lq-field__hint">الشفافة بلا ظل: التطبيق بيعرضها على الغامق والفاتح، والنسخة البيضا بتنطلب برابط.</span>
     </label>
 
@@ -54,10 +56,11 @@
         <legend class="lq-field__label">عزل الخلفية</legend>
         @foreach ($pr['methods'] as $value => $label)
             <label class="lq-check lq-settings-choice">
-                <input type="radio" name="bg_removal_method" value="{{ $value }}" @checked($pr['method'] === $value)>
+                <input type="radio" name="bg_removal_method" value="{{ $value }}" @checked($pr['method'] === $value) {{ $fieldAttrs('bg_removal_method') }}>
                 <span>{{ $label }}</span>
             </label>
         @endforeach
+        {{ $fieldError('bg_removal_method') }}
         <span class="lq-field__hint" data-bg-hint>{{ $pr['hint'] }}</span>
     </fieldset>
 
