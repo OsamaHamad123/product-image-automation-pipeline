@@ -186,6 +186,179 @@
     --lq-sidebar-width: 236px;
     /* the bottom tab bar that replaces the sidebar at 980px and below (0 above it) */
     --lq-tabbar-h: 0px;
+
+    /* Theme-aware extras (the dark set below redefines each one) */
+    --lq-inverse-bg: var(--lq-ink-900);                 /* a pressed filter: the strongest surface there is */
+    --lq-inverse-fg: var(--lq-text-on-dark);
+    --lq-sidebar-edge: transparent;                     /* the line between the sidebar and the page */
+    --lq-theme-color: #0B2226;                          /* <meta name="theme-color">: the sidebar's ink */
+    --lq-image-surface: #FFFFFF;                        /* behind a product image (never inverted) */
+    --lq-image-check: #E7ECEF;                          /* the second square of the transparency checker */
+    --lq-select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%234F6270' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+
+    color-scheme: light;
+}
+
+/*
+ * Dark theme. <html data-theme="dark"> forces it, data-theme="light" forces the light set above, no attribute
+ * follows the system. Only tokens change; components keep var(--lq-*). The two blocks carry the same values
+ * (tests/test_dark_mode_shell.py compares them). Theme-independent on purpose: the teal and saffron primitives,
+ * the *-on-dark texts, the ink texts and the run card's own colours (they sit on the always-dark sidebar).
+ */
+:root[data-theme="dark"] {
+    --lq-bg: #0B1418;
+    --lq-surface: #121E23;
+    --lq-surface-2: #17252B;
+    --lq-surface-3: #1F3038;
+    --lq-border: #24363E;
+    --lq-border-soft: #1C2C33;
+    --lq-border-strong: #355058;
+    --lq-text: #E6EEF0;
+    --lq-text-2: #B4C4CA;
+    --lq-text-3: #93A7AF;
+
+    --lq-ink-900: #060D10;
+    --lq-ink-800: #10232A;
+    --lq-ink-700: #1A3640;
+
+    --lq-success: #4CC97A;
+    --lq-success-dot: #34C76A;
+    --lq-success-bg: #0F2A1C;
+    --lq-success-border: #1E5236;
+    --lq-success-ink: #9BE5B4;
+    --lq-warning: #F0A84A;
+    --lq-warning-dot: #F59E0B;
+    --lq-warning-bg: #2D2110;
+    --lq-warning-border: #5C4417;
+    --lq-warning-ink: #F5CF8E;
+    --lq-danger: #F0646B;
+    --lq-danger-text: #FF8A8F;
+    --lq-danger-dot: #F0585E;
+    --lq-danger-bg: #2E1518;
+    --lq-danger-border: #5E2A2F;
+    --lq-danger-ink: #FFB8BB;
+    --lq-info: #6FA0FF;
+    --lq-info-text: #8DB4FF;
+    --lq-info-bg: #13213A;
+    --lq-info-border: #2A4371;
+    --lq-neutral: #8FA0AB;
+    --lq-neutral-dot: #6F818C;
+    --lq-neutral-bar: #4F616B;
+    --lq-neutral-bg: #1C2A30;
+
+    --lq-accent: #3CC9B7;
+    --lq-accent-hover: #5ED8C8;
+    --lq-accent-strong: #8BE6DA;
+    --lq-accent-soft: #123B39;
+    --lq-accent-soft-hover: #17504B;
+    --lq-accent-ring: #2A8F86;
+    --lq-accent-wash: #0E2A29;
+    --lq-on-accent: #04201D;
+    --lq-on-accent-tint: rgba(4, 32, 29, 0.18);
+    --lq-on-accent-track: rgba(4, 32, 29, 0.3);
+    --lq-scrim: rgba(0, 0, 0, 0.65);
+    --lq-ink-hover: rgba(26, 54, 64, 0.6);
+    --lq-ink-divider: rgba(255, 255, 255, 0.07);
+    --lq-swatch-edge: rgba(255, 255, 255, 0.14);
+
+    --lq-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --lq-shadow-raised: 0 1px 3px rgba(0, 0, 0, 0.5);
+    --lq-shadow-toast: 0 8px 24px rgba(0, 0, 0, 0.45);
+    --lq-shadow-bar: 0 -6px 20px rgba(0, 0, 0, 0.35);
+    --lq-shadow-primary: 0 6px 16px rgba(60, 201, 183, 0.16);
+    --lq-shadow-dialog: 0 24px 60px rgba(0, 0, 0, 0.6);
+    --lq-shadow-thumb: 0 1px 2px rgba(0, 0, 0, 0.5);
+    --lq-shadow-focus: 0 0 0 3px rgba(60, 201, 183, 0.35);
+    --lq-focus: #5EEAD4;
+
+    --lq-inverse-bg: #E6EEF0;
+    --lq-inverse-fg: #0B1418;
+    --lq-sidebar-edge: #1C2C33;
+    --lq-theme-color: #060D10;
+    --lq-image-surface: #E9EEF0;
+    --lq-image-check: #CBD5DB;
+    --lq-select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23B4C4CA' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+
+    color-scheme: dark;
+}
+
+@media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+        --lq-bg: #0B1418;
+        --lq-surface: #121E23;
+        --lq-surface-2: #17252B;
+        --lq-surface-3: #1F3038;
+        --lq-border: #24363E;
+        --lq-border-soft: #1C2C33;
+        --lq-border-strong: #355058;
+        --lq-text: #E6EEF0;
+        --lq-text-2: #B4C4CA;
+        --lq-text-3: #93A7AF;
+
+        --lq-ink-900: #060D10;
+        --lq-ink-800: #10232A;
+        --lq-ink-700: #1A3640;
+
+        --lq-success: #4CC97A;
+        --lq-success-dot: #34C76A;
+        --lq-success-bg: #0F2A1C;
+        --lq-success-border: #1E5236;
+        --lq-success-ink: #9BE5B4;
+        --lq-warning: #F0A84A;
+        --lq-warning-dot: #F59E0B;
+        --lq-warning-bg: #2D2110;
+        --lq-warning-border: #5C4417;
+        --lq-warning-ink: #F5CF8E;
+        --lq-danger: #F0646B;
+        --lq-danger-text: #FF8A8F;
+        --lq-danger-dot: #F0585E;
+        --lq-danger-bg: #2E1518;
+        --lq-danger-border: #5E2A2F;
+        --lq-danger-ink: #FFB8BB;
+        --lq-info: #6FA0FF;
+        --lq-info-text: #8DB4FF;
+        --lq-info-bg: #13213A;
+        --lq-info-border: #2A4371;
+        --lq-neutral: #8FA0AB;
+        --lq-neutral-dot: #6F818C;
+        --lq-neutral-bar: #4F616B;
+        --lq-neutral-bg: #1C2A30;
+
+        --lq-accent: #3CC9B7;
+        --lq-accent-hover: #5ED8C8;
+        --lq-accent-strong: #8BE6DA;
+        --lq-accent-soft: #123B39;
+        --lq-accent-soft-hover: #17504B;
+        --lq-accent-ring: #2A8F86;
+        --lq-accent-wash: #0E2A29;
+        --lq-on-accent: #04201D;
+        --lq-on-accent-tint: rgba(4, 32, 29, 0.18);
+        --lq-on-accent-track: rgba(4, 32, 29, 0.3);
+        --lq-scrim: rgba(0, 0, 0, 0.65);
+        --lq-ink-hover: rgba(26, 54, 64, 0.6);
+        --lq-ink-divider: rgba(255, 255, 255, 0.07);
+        --lq-swatch-edge: rgba(255, 255, 255, 0.14);
+
+        --lq-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4);
+        --lq-shadow-raised: 0 1px 3px rgba(0, 0, 0, 0.5);
+        --lq-shadow-toast: 0 8px 24px rgba(0, 0, 0, 0.45);
+        --lq-shadow-bar: 0 -6px 20px rgba(0, 0, 0, 0.35);
+        --lq-shadow-primary: 0 6px 16px rgba(60, 201, 183, 0.16);
+        --lq-shadow-dialog: 0 24px 60px rgba(0, 0, 0, 0.6);
+        --lq-shadow-thumb: 0 1px 2px rgba(0, 0, 0, 0.5);
+        --lq-shadow-focus: 0 0 0 3px rgba(60, 201, 183, 0.35);
+        --lq-focus: #5EEAD4;
+
+        --lq-inverse-bg: #E6EEF0;
+        --lq-inverse-fg: #0B1418;
+        --lq-sidebar-edge: #1C2C33;
+        --lq-theme-color: #060D10;
+        --lq-image-surface: #E9EEF0;
+        --lq-image-check: #CBD5DB;
+        --lq-select-chevron: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%23B4C4CA' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+
+        color-scheme: dark;
+    }
 }
 
 /* ==========================================================================
@@ -375,6 +548,7 @@ html:has(.lq-body) {
 .lq-sidebar {
     width: var(--lq-sidebar-width);
     flex-shrink: 0;
+    border-inline-end: 1px solid var(--lq-sidebar-edge);
     background: var(--lq-ink-900);
     color: var(--lq-ink-fg);
 }
@@ -561,9 +735,10 @@ html:has(.lq-body) {
     font-weight: 600;
 }
 
-/* Signed-in user + sign-out (sidebar foot) */
+/* Signed-in user + sign-out (sidebar foot); the theme switch takes the row above them */
 .lq-sidebar__user {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
@@ -582,6 +757,55 @@ html:has(.lq-body) {
 
 .lq-sidebar__user .lq-btn--ghost {
     color: var(--lq-ink-fg);
+}
+
+.lq-sidebar__user .lq-theme-switch {
+    flex-basis: 100%;
+}
+
+/* «فاتح / غامق / تلقائي» (layout.js setTheme): a segmented control, full width wherever it sits */
+.lq-segmented.lq-theme-switch {
+    display: grid;
+    grid-auto-columns: minmax(0, 1fr);
+    grid-auto-flow: column;
+    width: 100%;
+}
+
+.lq-body .lq-theme-switch .lq-segmented__item {
+    padding: 0 var(--lq-space-2);
+}
+
+.lq-account-sheet .lq-theme-switch {
+    margin-top: var(--lq-space-2);
+}
+
+/* the segmented control on the dark sidebar */
+.lq-segmented.lq-segmented--ink {
+    background: var(--lq-ink-800);
+}
+
+.lq-body .lq-segmented--ink .lq-segmented__item,
+.lq-segmented--ink .lq-segmented__item {
+    color: var(--lq-ink-muted);
+}
+
+.lq-body .lq-segmented--ink .lq-segmented__item:hover,
+.lq-segmented--ink .lq-segmented__item:hover {
+    color: var(--lq-text-on-dark);
+}
+
+.lq-body .lq-segmented--ink .lq-segmented__item[aria-pressed="true"],
+.lq-segmented--ink .lq-segmented__item[aria-pressed="true"] {
+    background: var(--lq-ink-700);
+    color: var(--lq-text-on-dark);
+    box-shadow: none;
+}
+
+/* A product image's frame: its own light surface, a checker behind transparent PNGs, never an inverted image */
+.lq-image-frame {
+    background-color: var(--lq-image-surface);
+    background-image: repeating-conic-gradient(var(--lq-image-check) 0% 25%, transparent 0% 50%);
+    background-size: 16px 16px;
 }
 
 /* Run-status mini card (sidebar) */
@@ -1240,9 +1464,9 @@ a.lq-btn[aria-disabled="true"] {
 .lq-body .lq-filter.is-active,
 .lq-filter[aria-pressed="true"],
 .lq-filter.is-active {
-    border-color: var(--lq-ink-900);
-    background: var(--lq-ink-900);
-    color: var(--lq-text-on-dark);
+    border-color: var(--lq-inverse-bg);
+    background: var(--lq-inverse-bg);
+    color: var(--lq-inverse-fg);
 }
 
 .lq-filter__count {
@@ -1464,7 +1688,7 @@ a.lq-btn[aria-disabled="true"] {
 .lq-select {
     padding-inline-end: 34px;
     appearance: none;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%234F6270' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+    background-image: var(--lq-select-chevron);
     background-repeat: no-repeat;
     background-position: left 12px center;
     background-size: 16px;
@@ -2246,6 +2470,7 @@ a.lq-btn[aria-disabled="true"] {
         height: var(--lq-tabbar-h);
         padding-block-end: env(safe-area-inset-bottom, 0px);
         border-block-start: 1px solid var(--lq-ink-800);
+        border-inline-end: 0;
     }
 
     .lq-sidebar__inner {

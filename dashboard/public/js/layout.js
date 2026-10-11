@@ -8,7 +8,11 @@
  * - Approvals running on the server (batch-status.approvals) under the run card; the session-expired banner
  *   (#lqSessionExpired) on 401 / 419.
  * - window.Laqta: normalizeRunStatus, describeRunStatus, plainNotice, refreshRunStatus, sessionExpired,
- *   sessionRestored, lastRunStatus, onRunStatus (and the `lq:run-status` document event), toast, ask, runNotice.
+ *   sessionRestored, lastRunStatus, onRunStatus (and the `lq:run-status` document event), toast, ask, runNotice,
+ *   closeAccount, setTheme.
+ * - The theme: «فاتح / غامق / تلقائي» ([data-lq-theme-switch], sidebar foot and «حسابي») calls setTheme, which keeps
+ *   the choice in localStorage «laqta.theme», sets or removes <html data-theme> and updates the color-scheme and
+ *   theme-color metas (js/theme-boot.js applied the stored choice before the first paint).
  * - data-lq-confirm asks before the click goes through; segmented controls send `lq:change`; «حسابي» on the phone
  *   tab bar opens the name and «خروج».
  * Everything it needs from the server is in the page: <body data-lq-*> and <meta name="csrf-token">.
@@ -559,7 +563,56 @@
         });
     }
 
+    // المظهر: 'light' | 'dark' | 'system' (تلقائي = متل الجهاز، بلا data-theme). التخزين ممكن يكون ممنوع (وضع خاص):
+    // وقتها الاختيار بيضل لهالصفحة بس
+    var THEME_KEY = 'laqta.theme';
+    var THEME_ORDER = ['light', 'dark', 'system'];
+    function readTheme() {
+        try {
+            var v = window.localStorage.getItem(THEME_KEY);
+            return v === 'light' || v === 'dark' ? v : 'system';
+        } catch (e) {
+            return 'system';
+        }
+    }
+    var themeChoice = readTheme();
+    function applyTheme() {
+        var root = document.documentElement;
+        if (root) {
+            if (themeChoice === 'system') root.removeAttribute('data-theme');
+            else root.setAttribute('data-theme', themeChoice);
+        }
+        var scheme = $('meta[name="color-scheme"]');
+        if (scheme) scheme.setAttribute('content', themeChoice === 'system' ? 'light dark' : themeChoice);
+        var tint = $('meta[name="theme-color"]');
+        if (tint && root && typeof window.getComputedStyle === 'function') {
+            var colour = String(window.getComputedStyle(root).getPropertyValue('--lq-theme-color') || '').trim();
+            if (colour) tint.setAttribute('content', colour);
+        }
+        var groups = document.querySelectorAll('[data-lq-theme-switch]');
+        for (var g = 0; g < groups.length; g++) {
+            var items = groups[g].querySelectorAll('.lq-segmented__item');
+            for (var i = 0; i < items.length; i++) {
+                items[i].setAttribute('aria-pressed', items[i].getAttribute('data-value') === themeChoice ? 'true' : 'false');
+            }
+        }
+    }
+    // setTheme('dark') بيختار؛ setTheme() بلا قيمة بيلف: فاتح ← غامق ← تلقائي ← فاتح
+    function setTheme(choice) {
+        if (choice === undefined) {
+            choice = THEME_ORDER[(THEME_ORDER.indexOf(themeChoice) + 1) % THEME_ORDER.length];
+        }
+        if (THEME_ORDER.indexOf(choice) < 0) choice = 'system';
+        themeChoice = choice;
+        try {
+            window.localStorage.setItem(THEME_KEY, choice);
+        } catch (e) { /* blocked storage: this page only */ }
+        applyTheme();
+        return choice;
+    }
+
     window.Laqta = {
+        setTheme: setTheme,
         normalizeRunStatus: normalizeRunStatus,
         describeRunStatus: describeRunStatus,
         plainNotice: plainNotice,
@@ -618,6 +671,22 @@
         }
         group.dispatchEvent(new CustomEvent('lq:change', { bubbles: true, detail: { value: item.getAttribute('data-value') } }));
     });
+
+    document.addEventListener('click', function (e) {
+        var item = e.target && e.target.closest ? e.target.closest('[data-lq-theme-switch] .lq-segmented__item') : null;
+        if (item && !item.disabled) setTheme(item.getAttribute('data-value'));
+    });
+    // تبويب ثاني غيّر المظهر، أو الجهاز غيّر (لون theme-color بـ «تلقائي»)
+    if (window.addEventListener) window.addEventListener('storage', function (e) {
+        if (e.key !== THEME_KEY) return;
+        themeChoice = readTheme();
+        applyTheme();
+    });
+    try {
+        var darkQuery = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
+        if (darkQuery && darkQuery.addEventListener) darkQuery.addEventListener('change', applyTheme);
+    } catch (e) { /* old browsers: the colours still follow the system through CSS */ }
+    applyTheme();
 
     // «حسابي» بشريط الموبايل: بيفتح ويسكّر القائمة الصغيرة (الاسم و«روح لـ…» و«خروج»)؛ Esc أو كبسة برّاها بتسكّرها.
     // هي aria-modal: Tab بيلف بين زرارها، وEsc بيرجّع التركيز لزر «حسابي»

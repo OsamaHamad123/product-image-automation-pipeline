@@ -4,8 +4,10 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="color-scheme" content="light">
+    <meta name="color-scheme" content="light dark">
     <meta name="theme-color" content="#0B2226">
+    {{-- the chosen theme (laqta.theme) before the first paint, as in the layout --}}
+    <script src="{{ asset('js/theme-boot.js') }}?v={{ @filemtime(public_path('js/theme-boot.js')) ?: '1' }}"></script>
     <meta name="robots" content="noindex, nofollow">
     <link rel="icon" type="image/svg+xml" href="{{ asset('favicon.svg') }}">
     <title>تسجيل الدخول · لقطة</title>
@@ -17,7 +19,7 @@
         .lq-login { min-height: 100vh; display: grid; place-items: center; padding: 24px 16px; background: var(--lq-bg); }
         .lq-login__box { width: 100%; max-width: 380px; }
         .lq-login__brand { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 20px; color: var(--lq-text); }
-        /* the sidebar paints the name white (dark background); here the page is light */
+        /* the sidebar paints the name white (its ink background); here it sits on the page: the text token */
         .lq-login .lq-login__brand .lq-brand__name { font-family: Alexandria, sans-serif; font-size: 1.5rem; font-weight: 700; color: var(--lq-text); }
         .lq-login form { display: grid; gap: 16px; }
         .lq-login__remember { display: flex; align-items: center; gap: 8px; font-size: .9rem; }

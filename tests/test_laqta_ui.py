@@ -263,7 +263,9 @@ def test_layout_loads_only_google_fonts_and_local_css():
     hosts = set(re.findall(r"(?:href|src)=\"(?:https?:)?//([^/\"]+)", layout))
     assert hosts == {"fonts.googleapis.com", "fonts.gstatic.com"}, hosts
     # the shell's own files, versioned so the browser caches them, and the «روح لـ…» places as JSON; no inline block
+    # theme-boot.js first and synchronous in <head> (the theme before the first paint, before the CSS)
     assert re.findall(r"<script\b[^>]*>", layout, flags=re.IGNORECASE) == [
+        "<script src=\"{{ asset('js/theme-boot.js') }}?v={{ @filemtime(public_path('js/theme-boot.js')) ?: '1' }}\">",
         "<script type=\"application/json\" id=\"lqGotoIndex\">",
         "<script src=\"{{ asset('js/layout.js') }}?v={{ @filemtime(public_path('js/layout.js')) ?: '1' }}\">",
         "<script src=\"{{ asset('js/jump.js') }}?v={{ @filemtime(public_path('js/jump.js')) ?: '1' }}\">"]

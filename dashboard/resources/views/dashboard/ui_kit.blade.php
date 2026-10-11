@@ -19,28 +19,28 @@
             ['نص على زعفران', '--lq-saffron-ink', '#2B1A02'],
         ]],
         ['name' => 'الحبر: الشريط الجانبي واللوحات الداكنة', 'items' => [
-            ['حبر 900', '--lq-ink-900', '#0B2226'],
-            ['حبر 800', '--lq-ink-800', '#12313A'],
-            ['حبر 700', '--lq-ink-700', '#1C4450'],
+            ['حبر 900', '--lq-ink-900', '#0B2226', '#060D10'],
+            ['حبر 800', '--lq-ink-800', '#12313A', '#10232A'],
+            ['حبر 700', '--lq-ink-700', '#1C4450', '#1A3640'],
             ['نص الشريط', '--lq-ink-text', '#B8CDD1'],
             ['حبر 300', '--lq-ink-muted', '#8FB0B6'],
         ]],
         ['name' => 'المحايد: خلفية هادئة ونص واضح', 'items' => [
-            ['خلفية', '--lq-bg', '#F3F6F8'],
-            ['سطح', '--lq-surface', '#FFFFFF'],
-            ['سطح 2', '--lq-surface-2', '#F8FAFB'],
-            ['حدود', '--lq-border', '#E2E8EC'],
-            ['حدود قوية', '--lq-border-strong', '#CBD5DB'],
-            ['نص', '--lq-text', '#0E1C24'],
-            ['نص ثانوي', '--lq-text-2', '#4F6270'],
-            ['نص خافت', '--lq-text-3', '#5E6F7C'],
+            ['خلفية', '--lq-bg', '#F3F6F8', '#0B1418'],
+            ['سطح', '--lq-surface', '#FFFFFF', '#121E23'],
+            ['سطح 2', '--lq-surface-2', '#F8FAFB', '#17252B'],
+            ['حدود', '--lq-border', '#E2E8EC', '#24363E'],
+            ['حدود قوية', '--lq-border-strong', '#CBD5DB', '#355058'],
+            ['نص', '--lq-text', '#0E1C24', '#E6EEF0'],
+            ['نص ثانوي', '--lq-text-2', '#4F6270', '#B4C4CA'],
+            ['نص خافت', '--lq-text-3', '#5E6F7C', '#93A7AF'],
         ]],
         ['name' => 'الحالات', 'items' => [
-            ['نجاح', '--lq-success', '#15803D'],
-            ['تحذير', '--lq-warning', '#B45309'],
-            ['خطأ', '--lq-danger', '#C8313A'],
-            ['معلومة', '--lq-info', '#2F6FEB'],
-            ['محايد', '--lq-neutral', '#6B7C89'],
+            ['نجاح', '--lq-success', '#15803D', '#4CC97A'],
+            ['تحذير', '--lq-warning', '#B45309', '#F0A84A'],
+            ['خطأ', '--lq-danger', '#C8313A', '#F0646B'],
+            ['معلومة', '--lq-info', '#2F6FEB', '#6FA0FF'],
+            ['محايد', '--lq-neutral', '#6B7C89', '#8FA0AB'],
         ]],
     ];
     $kitPrinciples = [
@@ -109,6 +109,9 @@
     .kit-principle__text { display: flex; flex-direction: column; gap: 3px; }
     .kit-principle__title { font-size: var(--lq-fs-sm); font-weight: 600; }
     .kit-principle__desc { font-size: var(--lq-fs-xs); color: var(--lq-text-2); line-height: var(--lq-lh-base); }
+    .kit-theme-switch { max-width: 360px; }
+    .kit-image-demo { display: flex; align-items: center; gap: var(--lq-space-3); }
+    .kit-image-demo__frame { display: block; width: 64px; height: 64px; flex-shrink: 0; border: 1px solid var(--lq-border); border-radius: var(--lq-radius-md); }
     .kit-swatches { display: grid; grid-template-columns: repeat(auto-fill, minmax(118px, 1fr)); gap: 12px; }
     .kit-swatch { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
     .kit-swatch__chip { height: 52px; margin-bottom: 3px; border: 1px solid var(--lq-swatch-edge); border-radius: var(--lq-radius-md); }
@@ -180,6 +183,7 @@
     <nav class="kit-toc" aria-label="أقسام الصفحة">
         <a class="lq-link" href="#kit-identity">الهوية</a>
         <a class="lq-link" href="#kit-colors">الألوان والخطوط</a>
+        <a class="lq-link" href="#kit-theme">المظهر</a>
         <a class="lq-link" href="#kit-type">مقاسات الخط</a>
         <a class="lq-link" href="#kit-spacing">المسافات والزوايا</a>
         <a class="lq-link" href="#kit-buttons">الأزرار</a>
@@ -228,6 +232,16 @@
         </x-lq.card>
     </div>
 
+    {{-- Theme: the same switch as the sidebar foot; every card below repaints with it --}}
+    <x-lq.card title="المظهر" meta="فاتح، غامق، أو تلقائي (متل الجهاز)" id="kit-theme">
+        <x-lq.segmented label="المظهر" :options="['light' => 'فاتح', 'dark' => 'غامق', 'system' => 'تلقائي']" value="system" size="sm" class="lq-theme-switch kit-theme-switch" data-lq-theme-switch />
+        <p class="kit-note">نفس زر أسفل الشريط الجانبي (وبقائمة «حسابي» عالموبايل): بيحفظ الاختيار بهالمتصفح (<bdi dir="ltr">localStorage laqta.theme</bdi>) وبيطبّقه قبل ما ترسم الصفحة. بدّل هون وشوف كل المكوّنات تحت بالمظهر الغامق؛ الألوان بتتغيّر من المتغيّرات بس (<bdi dir="ltr">:root[data-theme="dark"]</bdi>).</p>
+        <div class="kit-image-demo">
+            <span class="lq-image-frame kit-image-demo__frame" aria-hidden="true"></span>
+            <p class="kit-note">إطار صورة المنتج (<bdi dir="ltr">.lq-image-frame</bdi>): سطح فاتح ومربعات خلف الصور الشفافة بالمظهرين، والصورة نفسها ما بتنقلب.</p>
+        </div>
+    </x-lq.card>
+
     {{-- Colours and type --}}
     <x-lq.card title="الألوان" meta="تحت كل عيّنة اسم متغيّر CSS تبعها" id="kit-colors">
         @foreach ($kitPalette as $kitGroup)
@@ -238,13 +252,14 @@
                         <div class="kit-swatch">
                             <span class="kit-swatch__chip" style="background: var({{ $kitSwatch[1] }})"></span>
                             <span class="kit-swatch__name">{{ $kitSwatch[0] }}</span>
-                            <span class="kit-swatch__hex">{{ $kitSwatch[2] }}</span>
+                            <span class="kit-swatch__hex">{{ $kitSwatch[2] }}@isset($kitSwatch[3]) · {{ $kitSwatch[3] }}@endisset</span>
                             <span class="kit-swatch__token" title="{{ $kitSwatch[1] }}">{{ $kitSwatch[1] }}</span>
                         </div>
                     @endforeach
                 </div>
             </div>
         @endforeach
+        <p class="kit-note">العيّنة بتاخد لون المظهر الحالي؛ تحتها قيمة الفاتح، وبعد « · » قيمة الغامق إذا بتختلف (الفيروزي والزعفران ونصوص الشريط نفسها بالمظهرين).</p>
         <p class="kit-note">«نص خافت» أغمق بدرجة بسيطة من التصميم (<bdi dir="ltr">#6B7C89</bdi>) حتى يوصل التباين 4.5:1 على الخلفية.</p>
     </x-lq.card>
 
