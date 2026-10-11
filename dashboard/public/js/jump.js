@@ -117,19 +117,19 @@
         var lastGroup = null;
         results.forEach(function (r, i) {
             if (!options || r.group !== lastGroup) {
-                var section = el('li', 'lq-goto__section');
+                var section = el('div', 'lq-goto__section');
                 section.setAttribute('role', 'group');
                 section.setAttribute('aria-label', r.group);
                 var head = el('span', 'lq-goto__group', r.group);
                 head.setAttribute('aria-hidden', 'true');
-                options = el('ul', 'lq-goto__options');
+                options = el('div', 'lq-goto__options');
                 options.setAttribute('role', 'none');
                 section.appendChild(head);
                 section.appendChild(options);
                 list.appendChild(section);
                 lastGroup = r.group;
             }
-            var item = el('li', 'lq-goto__item');
+            var item = el('div', 'lq-goto__item');
             item.id = 'lqGotoItem' + i;
             item.setAttribute('role', 'option');
             item.setAttribute('aria-selected', i === selected ? 'true' : 'false');
@@ -216,7 +216,7 @@
         var label = el('span', 'lq-sr-only', 'روح لـ');
         field.appendChild(label);
         field.appendChild(input);
-        list = el('ul', 'lq-goto__list');
+        list = el('div', 'lq-goto__list');
         list.id = 'lqGotoList';
         list.setAttribute('role', 'listbox');
         list.setAttribute('aria-label', 'النتائج');
@@ -254,6 +254,8 @@
         if (box.parentNode) box.parentNode.removeChild(box);
         box = null;
         dlg = null;
+        // الصفحة كانت inert ورا النافذة (layout.js syncModals): بترجع قبل التركيز
+        if (root.Laqta && typeof root.Laqta.syncModals === 'function') root.Laqta.syncModals();
         // back where it was, unless that is gone or hidden meanwhile (the «حسابي» sheet hands its focus to its toggle)
         if (refocus && opener && typeof opener.focus === 'function' && doc.contains(opener)
             && !(opener.closest && opener.closest('[hidden]'))) opener.focus();

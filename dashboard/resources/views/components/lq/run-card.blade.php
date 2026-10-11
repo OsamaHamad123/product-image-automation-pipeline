@@ -34,7 +34,7 @@
     $lqPct = is_numeric($progress) ? max(0, min(100, round((float) $progress))) : null;
     $lqHref = $href ?? route('dashboard.index') . '#run-current';     // «اليوم»: the «التشغيل الحالي» card
 @endphp
-<section {{ $attributes->class(['lq-runcard']) }} data-state="{{ $lqState }}" aria-label="التشغيل الحالي" @if ($live) data-lq-runcard @endif>
+<section {{ $attributes->class(['lq-runcard']) }} data-state="{{ $lqState }}" aria-label="حالة التشغيل" @if ($live) data-lq-runcard @endif>
     <div class="lq-runcard__head">
         <span class="lq-runcard__title" aria-hidden="true">التشغيل الحالي</span>
         <span class="lq-runcard__state"><span class="lq-runcard__dot" aria-hidden="true"></span><span data-lq-run-state @if ($live) aria-live="polite" @endif>{{ $lqCopy['label'] }}</span></span>

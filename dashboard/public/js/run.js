@@ -854,7 +854,21 @@
             C.setHidden(btn, !(notice && notice.supported() && notice.permission() === 'default'));
         }
 
+        // التقدّم لقارئ الشاشة: جملة كل ما يعدّي ربع (والشريحة نفسها aria-live بتقول بلّش، وقف، خلص). أول رسم ما بيحكي:
+        // اللي فتح الصفحة والتشغيل بنصّه بيسمع لما يعدّي الربع الجاي
+        var saidQuarter = null;
+        function sayProgress(p) {
+            var box = $('progress-say');
+            if (!box) return;
+            var quarter = p && !p.starting && p.total > 0 ? Math.min(3, Math.floor((p.percent || 0) / 25)) : null;
+            var before = saidQuarter;
+            saidQuarter = quarter;
+            if (quarter === null || before === null || quarter <= before) return;
+            C.setText(box, 'التشغيل وصل ' + (quarter * 25) + '٪: ' + p.done + ' من ' + p.total);
+        }
+
         function renderLive(view) {
+            sayProgress(view.progress);
             var card = $('current');
             card.setAttribute('data-state', view.state);
             setChip($('chip'), $('chip-text'), view.chip);

@@ -151,6 +151,8 @@
                         <span class="lq-chip lq-chip--sm lq-chip--none" data-run="chip" aria-live="polite"><span class="lq-chip__dot" aria-hidden="true"></span><span data-run="chip-text">لحظة…</span></span>
                     </div>
                     <span class="lq-card__meta lq-num" data-run="meta"></span>
+                    {{-- قارئ الشاشة: التقدّم بينقال كل ربع (25٪، 50٪، 75٪)، مش مع كل سؤال (run.js sayProgress) --}}
+                    <p class="lq-sr-only" role="status" data-run="progress-say"></p>
                 </div>
 
                 <div class="lq-stack lq-stack--sm" data-run="loading" aria-hidden="true">

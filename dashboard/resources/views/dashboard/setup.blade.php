@@ -40,7 +40,7 @@
     <ol class="lq-setup-steps" data-setup="stepper" aria-label="خطوات التجهيز">
         @foreach ($setup['steps'] as $step)
             <li class="lq-setup-steps__item">
-                <a class="lq-setup-steps__link" href="{{ route('dashboard.system', ['tab' => 'setup', 'step' => $step['key']]) }}" data-setup-tab="{{ $step['key'] }}" data-status="{{ $step['status'] }}" @if ($step['key'] === $active) aria-current="step" @endif>
+                <a class="lq-setup-steps__link" href="{{ route('dashboard.system', ['tab' => 'setup', 'step' => $step['key']]) }}" data-setup-tab="{{ $step['key'] }}" data-status="{{ $step['status'] }}" aria-label="الخطوة {{ $step['n'] }}: {{ $step['title'] }}، {{ $step['label'] }}" @if ($step['key'] === $active) aria-current="step" @endif>
                     <span class="lq-setup-steps__n" aria-hidden="true">@if ($step['status'] === 'ok')<x-lq.icon name="check" :size="14" :stroke="2.6" />@else{{ $step['n'] }}@endif</span>
                     <span class="lq-setup-steps__text">
                         <span class="lq-setup-steps__title">{{ $step['title'] }}</span>

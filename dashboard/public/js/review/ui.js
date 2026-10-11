@@ -342,12 +342,30 @@
         return el('span', { className: `rv-lane rv-lane--${lane}`, dataset: { lane: lane }, title: R.LANE_TITLE[lane], text: R.LANE_TEXT[lane] });
     }
 
+    // نوافذ المراجعة (السؤال، التكبير، نافذة الرفض): الصفحة وراها inert (layout.js syncModals). بتنستدعى لما تسكّر النافذة
+    // قبل ما يرجع التركيز (عنصر inert ما بياخد تركيز)؛ بلا الشريط الجانبي (اختبارات node) ما بتعمل شي
+    function syncModals() {
+        if (root.Laqta && typeof root.Laqta.syncModals === 'function') root.Laqta.syncModals();
+    }
+
+    // نافذة aria-modal مفتوحة من برّا شاشة المراجعة («التنبيهات»، «حسابي»، «روح لـ…»، سؤال Laqta.ask): مفاتيح المراجعة
+    // (A، X، S، Enter، 1–9…) ما بتشتغل من وراها. المسكّرة (جوّا [hidden]) ما بتنحسب
+    function outsideModalOpen(app) {
+        try {
+            const found = document.querySelectorAll ? document.querySelectorAll('[aria-modal="true"]') : [];
+            return Array.from(found || []).some(n => !(app && typeof app.contains === 'function' && app.contains(n))
+                && !n.hidden && !(n.closest && n.closest('[hidden]')));
+        } catch (e) {
+            return false;
+        }
+    }
+
     // انتقال لصفحة ثانية (رابط «رجّع وشغّل» لصفحة التشغيل)؛ اختبارات node بتستبدله
     function navigate(url) {
         if (root.location && typeof root.location.assign === 'function') root.location.assign(url);
     }
 
     Object.assign(R, { ICONS, icon, el, bdi, clear, safeHttpUrl, imageUrl, img, imgRetrying, csrfToken, requestJson, toast, laneBadge,
-                       reducedMotion, scrollIntoView,
+                       reducedMotion, scrollIntoView, syncModals, outsideModalOpen,
                        sessionExpired, onSessionExpired, showSessionBanner, navigate });
 })(typeof window !== 'undefined' ? window : globalThis);

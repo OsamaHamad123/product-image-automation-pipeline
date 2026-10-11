@@ -337,6 +337,13 @@
             when.textContent = ago(ev.at);
             body.appendChild(text);
             body.appendChild(when);
+            // «جديد» بيبيّن باللون بس (is-new): قارئ الشاشة بيسمعه كلمة بعد الوقت
+            if (ev.at > s.read) {
+                var fresh = document.createElement('span');
+                fresh.className = 'lq-sr-only';
+                fresh.textContent = '، جديد';
+                body.appendChild(fresh);
+            }
             li.appendChild(body);
             list.appendChild(li);
         }
@@ -345,9 +352,28 @@
         setHidden(clearBtn, !s.events.length);
     }
 
-    function render() {
+    // قارئ الشاشة: تنبيه جديد بينقال مرة وحدة لما يزيد العدد (مش مع كل سؤال، ومش لما «للمراجعة» بس بيكبر رقمه)،
+    // ومش لما تبويب ثاني زاده (storage)
+    var said = null;
+    var lastUnseen = null;
+    function announce(s, c, quiet) {
+        var before = lastUnseen;
+        lastUnseen = c;
+        if (quiet || before === null || c <= before || !s.events.length) return;
+        if (!said && document.body && typeof document.createElement === 'function') {
+            said = document.createElement('div');
+            said.className = 'lq-sr-only';
+            said.setAttribute('role', 'status');
+            said.setAttribute('data-lq-notices-say', '');
+            document.body.appendChild(said);
+        }
+        if (said) said.textContent = (c === 1 ? 'تنبيه جديد: ' : c + ' تنبيهات جديدة، آخرها: ') + s.events[0].text;
+    }
+
+    function render(quiet) {
         var s = memory;
         var c = unseen(s);
+        announce(s, c, quiet === true);
         var badges = document.querySelectorAll('[data-lq-notices-count]');
         for (var i = 0; i < badges.length; i++) {
             badges[i].textContent = c > 0 ? String(c) : '';
@@ -389,6 +415,7 @@
         var s = load();
         setHidden(panel, false);
         setExpanded(true);
+        if (window.Laqta && typeof window.Laqta.syncModals === 'function') window.Laqta.syncModals();
         renderList(s);                          // what is new is marked for as long as the panel stays open
         s.seen = now();
         save(s);
@@ -399,6 +426,8 @@
         if (!isOpen()) return;
         setHidden(panel, true);
         setExpanded(false);
+        // الصفحة ورا اللوحة كانت inert (layout.js syncModals): بترجع قبل ما يرجع التركيز للجرس
+        if (window.Laqta && typeof window.Laqta.syncModals === 'function') window.Laqta.syncModals();
         if (!refocus) return;
         var back = opener && typeof opener.focus === 'function' && document.contains(opener)
             && !(opener.closest && opener.closest('[hidden]')) ? opener : null;
@@ -465,7 +494,7 @@
     if (window.addEventListener) window.addEventListener('storage', function (e) {
         if (e.key !== KEY) return;
         load();
-        render();
+        render(true);
     });
 
     if (window.Laqta && typeof window.Laqta.onRunStatus === 'function') window.Laqta.onRunStatus(onStatus);

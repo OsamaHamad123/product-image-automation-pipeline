@@ -1370,7 +1370,8 @@ ${candidate.url}` : item.key, productKey: item.key, stay: stay,
     }
 
     function pickImage(item, pick) {
-        const node = R.img(pick.url, pick.title || 'الصورة المختارة', st().urls.imageProxy, 'rv-pick__img');
+        // alt: اسم المنتج (عنوان صفحة المصدر ممكن يكون اسم ملف متل «p19.jpg»، وهو مكتوب تحت الصورة أصلاً)
+        const node = R.img(pick.url, `${productLabel(item)}: الصورة المختارة`, st().urls.imageProxy, 'rv-pick__img');
         trackPick(item, pick, node);
         return node;
     }

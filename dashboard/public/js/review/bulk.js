@@ -525,6 +525,11 @@
         return open;
     }
 
+    // اسم البطاقة لقارئ الشاشة: المنتج وحالته، و«محددة» (refreshCards بيحدّثه مع مسافة)
+    function cardLabel(it) {
+        return `${cardName(it)}، ${statusChip(it).textContent}${ticked(it) ? '، محددة' : ''}`;
+    }
+
     function card(it) {
         const S = st();
         const p = it.product;
@@ -565,7 +570,9 @@
             dataset: { key: it.key, kind: kindOf(it) },
             // roving tabindex: Tab بيدخل الشبكة مرة وحدة (عالبطاقة المركّزة أو الأولى)، والأسهم بتتنقّل جوّاها
             tabindex: it.key === rovingKey ? '0' : '-1',
-            'aria-current': focused ? 'true' : null
+            'aria-current': focused ? 'true' : null,
+            // البطاقة بتاخد التركيز (الأسهم): قارئ الشاشة بيقول المنتج وحالته، مش كل نص البطاقة
+            'aria-label': cardLabel(it)
         }, [
             el('div', { className: 'rv-card__img' + (sel ? '' : ' is-unproposed'),
                         dataset: Object.assign({ tick: shown ? `${it.key}\n${shown.url}` : '' }, shown ? { zoom: it.key } : {}),
@@ -601,9 +608,9 @@
                 el('div', { className: 'rv-card__actions' }, [
                     el('button', { type: 'button', className: 'lq-btn lq-btn--soft lq-btn--sm rv-card__approve', dataset: { approve: it.key },
                                    disabled: !approvable(it), title: can && !seenNow(it) ? 'الصورة لسا ما ظهرت لك' : null,
-                                   text: 'اعتماد' }),
+                                   'aria-label': `اعتماد «${name}»`, text: 'اعتماد' }),
                     el('a', { className: 'lq-btn lq-btn--secondary lq-btn--sm rv-card__open', dataset: { open: it.key },
-                              href: `?row=${encodeURIComponent(p.row_number)}`, text: 'افتح' })
+                              href: `?row=${encodeURIComponent(p.row_number)}`, 'aria-label': `افتح «${name}»`, text: 'افتح' })
                 ])
             ])
         ]);
@@ -811,6 +818,7 @@
             if (!it) return;
             const on = ticked(it);
             node.classList.toggle('is-selected', on);
+            node.setAttribute('aria-label', cardLabel(it));
             const box = node.querySelector('input[type="checkbox"]');
             if (box) {
                 box.checked = on;
@@ -1332,6 +1340,7 @@
         dialog = null;
         clear(d.dialog);
         d.dialog.hidden = true;
+        R.syncModals();
         if (opener && opener.isConnected !== false && typeof opener.focus === 'function') opener.focus();
         else if (d.bulkReject && typeof d.bulkReject.focus === 'function') d.bulkReject.focus();
         return true;

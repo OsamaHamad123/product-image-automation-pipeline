@@ -673,7 +673,7 @@
         <x-lq.card title="الإشعارات">
             <div class="kit-toast-stack">
                 <div class="lq-toast"><span class="lq-spinner" aria-hidden="true"></span><span class="lq-toast__text">جاري اعتماد 5 صور بالخلفية · <strong>2 من 5</strong> جاهزة. بتقدر تكمل شغلك.</span></div>
-                <div class="lq-toast lq-toast--success"><x-lq.icon name="check" :size="18" :stroke="2" class="lq-toast__icon" /><span class="lq-toast__text">انعتمدت الصورة وانكتب رابطها بالشيت.</span><button type="button" class="lq-toast__close" aria-label="إغلاق"><x-lq.icon name="x" :size="16" :stroke="2" /></button></div>
+                <div class="lq-toast lq-toast--success"><x-lq.icon name="check" :size="18" :stroke="2" class="lq-toast__icon" /><span class="lq-toast__text">انعتمدت الصورة وانكتب رابطها بالشيت.</span><button type="button" class="lq-toast__close" aria-label="سكّر"><x-lq.icon name="x" :size="16" :stroke="2" /></button></div>
                 <div class="lq-toast lq-toast--danger"><x-lq.icon name="alert" :size="18" :stroke="2" class="lq-toast__icon" /><span class="lq-toast__text">ما قدرنا نرفع الصورة على Cloudinary. جرّب كمان مرة.</span></div>
             </div>
             <div class="lq-row">
