@@ -1218,9 +1218,16 @@
     gap: 4px;
 }
 
+/* in a narrow alternative card a chip wraps to two or three lines: a soft box, the tick on its first line */
 .rv-explain--compact .rv-explain__chip {
+    align-items: flex-start;
     padding: 1px 6px;
+    border-radius: var(--lq-radius-sm);
     font-size: var(--lq-fs-xs);
+}
+
+.rv-explain--compact .rv-explain__chip .lq-icon {
+    margin-block-start: 0.3em;
 }
 
 /* "ما لقيت الصورة الصحيحة؟" */
@@ -1963,6 +1970,7 @@
     align-items: center;
     gap: 14px;
     padding: var(--lq-space-3) var(--lq-space-4);
+    border: 1px solid var(--lq-ink-700);
     border-radius: 14px;
     background: var(--lq-ink-900);
     color: var(--lq-text-on-dark);
@@ -2431,10 +2439,18 @@
     flex-shrink: 0;
 }
 
+/* three modes in the 340px queue column: they share its width instead of spilling past its edge */
+.rv-queue__head .rv-modes {
+    align-self: stretch;
+}
+
 .lq-body .rv-modes__item,
 .rv-modes__item {
     gap: 6px;
+    min-width: 0;
+    padding-inline: var(--lq-space-2);
     font-family: inherit;
+    white-space: nowrap;
 }
 
 .rv-modes__item.is-active,
@@ -2780,9 +2796,24 @@ body.rv-lb-open {
 }
 
 @media (max-width: 980px) {
+    /* the tab bar takes --lq-tabbar-h off the screen: a full-height page above it, not 100vh that scrolls for nothing */
+    .page-review .lq-main,
+    .rv-app {
+        min-height: calc(100vh - var(--lq-tabbar-h));
+    }
+
     .rv-single {
         flex-direction: column;
         min-height: 0;
+    }
+
+    /* a short bulk page: the selection bar still sits on the tab bar, not halfway up with the page showing under it */
+    .rv-bulk {
+        min-height: calc(100vh - var(--lq-tabbar-h));
+    }
+
+    .rv-bulk > .rv-bulkbar {
+        margin-block-start: auto;
     }
 
     /* the page reads head → product → list, in the DOM too (app.js placeQueueHead moves the head here) */
@@ -3018,6 +3049,7 @@ body.rv-lb-open {
         gap: var(--lq-space-2);
         margin-inline: 0;
         padding: 10px var(--lq-space-3);
+        border-block-end: 0;
         border-radius: 14px 14px 0 0;
         box-shadow: var(--rv-bar-shadow-up);
     }
