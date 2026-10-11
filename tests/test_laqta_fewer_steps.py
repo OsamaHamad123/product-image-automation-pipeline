@@ -196,7 +196,7 @@ out.retried = requests('/api/failures/retry').map(c => c.body.barcodes.length);
 out.confirms = confirms.length;
 """, tmp_path, fixture)
     assert out["retried"] == [4] and out["confirms"] == 0
-    assert out["nav"] == ["/batch-automation?scope=rows&rows=5-7%2C9"]
+    assert out["nav"] == ["/?scope=rows&rows=5-7%2C9#run-new"]
 
 
 @NEEDS_NODE

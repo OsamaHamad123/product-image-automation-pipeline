@@ -26,7 +26,7 @@
         retry: '/api/failures/retry',
         imageProxy: '/api/image-proxy',
         export: '/rich-catalog/export',
-        run: '/batch-automation',
+        run: '/',
         publishCheck: '/system-diagnostics#publish-check',
         bgMethod: '/api/settings/bg-method',
         reviewLanes: '/api/system/review-lanes'

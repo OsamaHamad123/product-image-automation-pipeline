@@ -27,14 +27,14 @@
     var PHASES = { starting: 'running', running: 'running', paused: 'paused', stopping: 'stopping',
                    error: 'error', review: 'idle', idle: 'idle' };
     var COPY = {
-        loading: { label: 'لحظة…', text: 'لحظة، عم نقرأ حالة التشغيل…', link: 'صفحة التشغيل ←' },
+        loading: { label: 'لحظة…', text: 'لحظة، عم نقرأ حالة التشغيل…', link: 'التشغيل ←' },
         idle: { label: 'جاهز', text: 'ما في تشغيل هلق', link: 'ابدأ تشغيل جديد ←' },
         running: { label: 'يعمل', text: 'عم نجهّز التشغيل…', link: 'عرض التفاصيل ←' },
         paused: { label: 'متوقف مؤقتاً', text: 'التشغيل متوقف مؤقتاً', link: 'عرض التفاصيل ←' },
         stopping: { label: 'عم يوقف', text: 'بيكمّل المنتج الحالي وبيوقف', link: 'عرض التفاصيل ←' },
         error: { label: 'توقف بعطل', text: 'توقف التشغيل بسبب عطل.', link: 'عرض التفاصيل ←' },
-        stuck: { label: 'عالق', text: 'التشغيل عالق', link: 'صفحة التشغيل ←' },
-        unknown: { label: 'غير معروف', text: 'تعذّر قراءة حالة التشغيل', link: 'صفحة التشغيل ←' }
+        stuck: { label: 'عالق', text: 'التشغيل عالق', link: 'التشغيل ←' },
+        unknown: { label: 'غير معروف', text: 'تعذّر قراءة حالة التشغيل', link: 'التشغيل ←' }
     };
     // Worker notices are "CODE: message | CODE: message"; show plain Arabic instead of the codes.
     var NOTICE_TEXT = {
