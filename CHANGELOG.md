@@ -11,6 +11,46 @@ causes: the quality gate threw away white-background packshots, an unverified "l
 success, siblings of the right product outranked it, and reviewers' rejections were never remembered. The search
 core was rebuilt and wired into the queue, the dashboard actions and the sheet writes. Every claim below has a test.
 
+### UI redesign, phases 2 and 3: three destinations instead of eight pages
+
+The nav is «اليوم», «المراجعة» and «النظام». Every old address redirects, and «روح لـ…» knows the new places.
+
+**«اليوم» (`/`): Home and Run on one page**
+- Admin order:
+  1. Header.
+  2. The setup card, while setup is unfinished.
+  3. The next step, with ONE alert banner that merges the run alert and the provider alerts.
+  4. The KPI tiles.
+  5. «التشغيل»: the new-run and current-run cards side by side.
+  6. The sheet funnel (a flat card).
+  7. «أدوات الشيت»: brands, barcodes, sheet quality and export as ARIA tabs. `#run-brands` and the other tool
+     anchors select a tab, and each tool loads its data the first time it is shown.
+- A reviewer gets the header, the next step, the KPIs and the funnel. The server renders no run panel or tools
+  for them.
+- Gone as duplicates:
+  - Home's «آخر تشغيل» card.
+  - «جاهزية النشر الآلي», which Settings › النشر الآلي shows.
+  - The services and cost strip, which «النظام» shows.
+  - The Run page's own banner and jump row.
+- run.js owns the one `/api/run/live` poll for an admin, and home.js listens to it. For a reviewer, home.js polls
+  alone.
+- `/batch-automation?…` redirects to `/?…` with the same query. «رجّع وشغّل» lands on `#run-new`.
+
+**«النظام» (`/system?tab=`): Health, Settings and Setup on one page with one rail**
+- **الحالة:** `status` (attention, services, last run, lanes), `search` and `logs`. These are for both roles.
+- **الإعدادات:** the six settings tabs, unchanged.
+- **أدوات:** `publish`, `index`, `eval` and `recut`.
+- **التجهيز:** `setup`, the wizard, with `&step=`. While setup is unfinished, a «كمّل التجهيز (N من 5)» link sits
+  at the top of the rail.
+- The collapsed «تفاصيل متقدمة» is gone: each card has its own tab.
+- Health fixes link to their tab (`&goto=` focuses the button). An old `#card` link moves to the tab that now
+  holds the card.
+- A reviewer sees «الحالة» only. Asking for an owner tab shows the status tab, and a fix that leads to the
+  owner's pages, `/#run-…` included, is hidden for them. Settings saves, setup APIs and the owner reads stay
+  blocked as before.
+- `/system-diagnostics`, `/settings?tab=X` and `/setup?step=Y` redirect. `POST /settings` lands back on
+  `/system?tab=…#card`.
+
 ### UI redesign, phases 0 and 1: one design system, shorter copy, the review screen on a phone, one page fewer
 
 **Design system (laqta.css, components)**
