@@ -27,6 +27,14 @@ core was rebuilt and wired into the queue, the dashboard actions and the sheet w
     sessionStorage.
   - Ctrl+Z (⌘Z) undoes the last decision: a held one first, then the last sent reject, after asking.
   - A late undo, one that lands after the search, leaves the screen where it is.
+  - «آخر قراراتك» also lists «بالجملة» decisions, one line per card. «تراجع» on a held one takes back that card only.
+  - Shorter, plainer copy. Long notes (reject, preview, bulk reject, bg failed) are one line with «تفاصيل».
+    Vendor names (PhotoRoom, BiRefNet, Cloudinary) moved to tooltips, except where they name a key or credit to fix.
+- **Fixes found in a real browser.**
+  - The mode switch no longer runs past the queue column on desktop.
+  - On a phone, the bulk selection bar sits on the tab bar.
+  - The bar has a visible edge in dark mode.
+  - Evidence chips that wrap use soft corners.
 - **Design system on «اليوم» and «النظام».**
   - Page pills are shared tone chips.
   - The four page tone-colour sets became `lq-text--*`.
