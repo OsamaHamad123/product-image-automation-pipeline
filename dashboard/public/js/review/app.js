@@ -185,6 +185,7 @@
             el('div', { className: 'rv-queue__title' }, [
                 el('h1', { className: 'rv-queue__h1', text: 'قائمة المراجعة' }), d.waiting, d.refreshBtn, keysButton()
             ]),
+            sheetLine(),
             modeToggle('single'),
             el('label', { className: 'lq-search rv-search' }, [icon('search', 18), el('span', { className: 'lq-sr-only', text: 'بحث بالقائمة' }), d.search]),
             d.filters,
@@ -2086,6 +2087,20 @@
                               text: '?', onclick: () => showShortcuts() });
     }
     R.keysButton = keysButton;
+
+    // «الشيت: X · الورقة: Y» تحت عنوان القائمة (بالوضعين): الشيت اللي انقرت منه المنتجات (ReviewController::page
+    // config.sheet). للمالك رابط لـ«ربط الشيت»، للمراجع نص بس (href فاضي). null بلا معلومة
+    function sheetLine() {
+        const line = S.cfg && S.cfg.sheet;
+        if (!line || typeof line.sheet !== 'string' || typeof line.tab !== 'string') return null;
+        const parts = ['الشيت: ', bdi(line.sheet, null, 'auto'), ' · الورقة: ', bdi(line.tab, null, 'auto')];
+        const href = typeof line.href === 'string' && line.href.charAt(0) === '/' ? line.href : '';
+        const body = href
+            ? el('a', { className: 'lq-link', href: href, title: 'غيّر الشيت أو الورقة' }, parts)
+            : el('span', {}, parts);
+        return el('p', { className: 'rv-sheetline lq-text--muted', 'data-sheet-line': '' }, [body]);
+    }
+    R.sheetLine = sheetLine;
 
     function showShortcuts() {
         const rows = SHORTCUTS[S.mode] || SHORTCUTS.single;

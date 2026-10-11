@@ -70,6 +70,41 @@ class RunController extends Controller
                 'suspicious' => self::looksLikeBackupTab($title)];
     }
 
+    /**
+     * «الشيت: X · الورقة: Y» بـ«اليوم» وبرأس «المراجعة»: {sheet, tab, text, href}. بلا Google وبلا بايثون: الشيت المضبوط
+     * بـ .env (اسمه، أو أول حروف معرّفه لما يكون رابط؛ وإلا معرّف sheet_key آخر قراءة)، والورقة المضبوطة وإلا ورقة آخر
+     * قراءة. href: «ربط الشيت» بـ«النظام» للمالك، '' للمراجع (نص بس).
+     */
+    public static function sheetLine(bool $owner): array
+    {
+        $env = SettingsController::envValues(['SPREADSHEET_NAME_OR_URL', 'SPREADSHEET_TAB_NAME']);
+        $configured = trim((string) ($env['SPREADSHEET_NAME_OR_URL'] ?? ''));
+        $key = ProductController::currentSheetKey();
+        $keyId = $key !== null && str_contains($key, ':') ? trim(explode(':', $key, 2)[0]) : '';
+        if (preg_match('~/spreadsheets/(?:u/\d+/)?d/([A-Za-z0-9_-]+)~', $configured, $m)) {
+            $sheet = self::shortSheetId($m[1]);
+        } elseif ($configured !== '') {
+            $sheet = $configured;
+        } elseif ($keyId !== '') {
+            $sheet = self::shortSheetId($keyId);
+        } else {
+            $sheet = SettingsController::DEFAULT_SHEET;      // config.py's default sheet name
+        }
+        $tab = trim((string) ($env['SPREADSHEET_TAB_NAME'] ?? ''));
+        if ($tab === '') {
+            $tab = trim((string) self::knownFirstTab());
+        }
+        $tab = $tab !== '' ? $tab : 'أول ورقة';
+        return ['sheet' => $sheet, 'tab' => $tab, 'text' => 'الشيت: ' . $sheet . ' · الورقة: ' . $tab,
+                'href' => $owner ? SystemController::url('sheet') : ''];
+    }
+
+    /** أول 8 حروف من معرّف الشيت (طوله 44): بيكفي ليميّزه المالك. */
+    public static function shortSheetId(string $id): string
+    {
+        return mb_strlen($id) > 10 ? mb_substr($id, 0, 8) . '…' : $id;
+    }
+
     /** اسم أول تبويب كما عرفناه بلا طلب: كاش آخر قراءة للشيت، وإلا آخر «فحص النشر»؛ وإلا null. */
     public static function knownFirstTab(): ?string
     {
@@ -469,13 +504,12 @@ class RunController extends Controller
      */
     public static function cachedSheetRows(): ?array
     {
-        $path = base_path('../products_cache.json');
-        clearstatcache(true, $path);
-        if (!is_file($path)) {
+        // the same stamp as sheetRows: products_cache.json's mtime and size, and the configured sheet and tab
+        $stamp = ProductController::sheetStamp();
+        if ($stamp === null) {
             return null;
         }
         $cached = Cache::get(ProductController::SHEET_ROWS_CACHE_KEY);
-        $stamp = filemtime($path) . ':' . filesize($path);
         return is_array($cached) && ($cached['stamp'] ?? null) === $stamp && is_array($cached['rows'] ?? null)
             ? $cached['rows'] : null;
     }

@@ -229,8 +229,12 @@
         d.bulkCount = el('span', { className: 'rv-bulk__count', text: '' });
         d.bulkProgress = el('span', { className: 'rv-bulk__progress', id: 'rvBulkProgress', 'aria-live': 'polite', hidden: true });
         d.bulkHead = el('header', { className: 'rv-bulk__head' }, [
-            el('div', { className: 'rv-bulk__titles' }, [el('h1', { className: 'rv-bulk__h1', text: 'قائمة المراجعة' }), d.bulkCount, d.bulkProgress,
-                                                          R.keysButton()]),
+            // the titles row, and «الشيت: X · الورقة: Y» under it (R.sheetLine; null without a sheet line)
+            el('div', { className: 'rv-bulk__titlebox' }, [
+                el('div', { className: 'rv-bulk__titles' }, [el('h1', { className: 'rv-bulk__h1', text: 'قائمة المراجعة' }), d.bulkCount, d.bulkProgress,
+                                                              R.keysButton()]),
+                R.sheetLine ? R.sheetLine() : null
+            ]),
             R.modeToggle('bulk')
         ]);
         d.bulkBrand = el('select', { className: 'rv-brand__select', 'aria-label': 'الماركة' });

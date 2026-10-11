@@ -9,6 +9,7 @@ use App\Services\ImageProxy;
 use App\Services\PythonBridge;
 use App\Services\QueueStats;
 use App\Services\RunLauncher;
+use App\Services\SheetScope;
 
 class ApiController extends Controller
 {
@@ -924,7 +925,8 @@ class ApiController extends Controller
         }
         if (empty($barcodes) && $request->boolean('all')) {
             try {
-                $barcodes = DB::table('product_failures')->pluck('barcode')->all();
+                // the current sheet's failures (SheetScope): another sheet's errors are not this sheet's rows
+                $barcodes = SheetScope::apply(DB::table('product_failures'), 'product_failures')->pluck('barcode')->all();
             } catch (\Throwable $e) {
                 return response()->json(['status' => 'failed', 'error' => $e->getMessage()], 500);
             }
@@ -960,7 +962,7 @@ class ApiController extends Controller
             // بنفس الاسم والبراند لا يطابقه أي مفتاح عرض، ومفتاح العرض نفسه قد يحمله منتج آخر بنفس الاسم والبراند
             $failureSku = [];
             try {
-                $failureSku = DB::table('product_failures')
+                $failureSku = SheetScope::apply(DB::table('product_failures'), 'product_failures')
                     ->whereIn('barcode', array_values(array_unique(array_map(fn ($b) => trim((string) $b), $barcodes))))
                     ->whereNotNull('sku_key')
                     ->pluck('sku_key', 'barcode')->all();
@@ -972,6 +974,9 @@ class ApiController extends Controller
             $hasPayload = Schema::hasColumn('automation_queue', 'payload_json');
             $hasFailureCode = Schema::hasColumn('automation_queue', 'failure_code');
             $hasTrace = Schema::hasColumn('automation_queue', 'trace_json');
+            // the row is the current sheet's (unknown, or no column yet: sheet_key is left as it is)
+            $queueStamp = SheetScope::stamp('automation_queue');
+            $failureSheet = SheetScope::key('product_failures');
             $now = now();
 
             $rows = [];
@@ -1024,6 +1029,7 @@ class ApiController extends Controller
                 if ($hasTrace) {
                     $row['trace_json'] = null;
                 }
+                $row += $queueStamp;
                 // صف واحد لكل رقم صف (آخر تكرار يفوز)
                 $rows[$row['row_number']] = $row;
                 $failureKeys[] = $bClean;
@@ -1032,11 +1038,15 @@ class ApiController extends Controller
             if (!empty($rows)) {
                 $rows = array_values($rows);
                 $updateColumns = array_values(array_diff(array_keys($rows[0]), ['row_number']));
-                DB::transaction(function () use ($rows, $updateColumns, $failureKeys) {
+                DB::transaction(function () use ($rows, $updateColumns, $failureKeys, $failureSheet) {
                     // 1. إعادة إدراج الصفوف في طابور الأتمتة (INSERT ... ON DUPLICATE KEY UPDATE)
                     DB::table('automation_queue')->upsert($rows, ['row_number'], $updateColumns);
                     // 2. مسح الخطأ من جدول الفشل فقط بعد نجاح الإدراج
-                    DB::table('product_failures')->whereIn('barcode', $failureKeys)->delete();
+                    $failures = DB::table('product_failures')->whereIn('barcode', $failureKeys);
+                    if ($failureSheet !== null) {
+                        $failures->where('sheet_key', $failureSheet);
+                    }
+                    $failures->delete();
                 });
             }
             $successCount = count($rows);
@@ -1087,12 +1097,31 @@ class ApiController extends Controller
         if (isset($params['error'])) {
             return response()->json($params, 422);
         }
+        // a run reads and writes the sheet it started with: switching the sheet under it would mix two sheets' rows
+        if ($this->runActive()) {
+            return response()->json(['status' => 'failed', 'error_code' => 'run_active',
+                                     'error' => self::SHEET_RUN_ACTIVE], 409);
+        }
         ProductController::forgetProductCaches();
         $result = $this->runPython('sheet-save', $params);
         if (isset($result['status']) && $result['status'] === 'success') {
+            // the new sheet: its rows, its key (currentSheetKey) and the health numbers read from the old one
+            ProductController::forgetProductCaches();
+            ProductController::forgetSheetKey();
+            HealthController::forgetCaches();
             return response()->json($result, 200);
         }
         return response()->json($result, 500);
+    }
+
+    /** POST /api/sheet/save (Settings «ربط الشيت» and «جهّز لقطة»'s sheet step) while a run is active: 409. */
+    public const SHEET_RUN_ACTIVE = 'في تشغيل شغّال هلق. وقّفه أولاً وبعدين غيّر الشيت.';
+
+    /** A run is active as «اليوم» says it (batchStatus phase starting | running | paused | stopping). */
+    public function runActive(): bool
+    {
+        $phase = (string) ($this->batchStatus()->getData(true)['phase'] ?? 'idle');
+        return in_array($phase, RunController::ACTIVE_PHASES, true);
     }
 
     /** رابط شيت Google، كما يقبله cli_bridge.SHEET_URL_RE (رابط http(s) غيره مرفوض؛ النص بلا http اسم شيت). */

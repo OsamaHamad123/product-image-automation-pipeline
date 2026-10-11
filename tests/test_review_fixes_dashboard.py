@@ -253,7 +253,7 @@ echo json_encode($out);
 
 def test_save_candidates_uses_the_shared_row_builder():
     text = read(DASH / "app" / "Http" / "Controllers" / "CurationController.php")
-    assert "CandidateRow::optionalColumns($c, $skuKey, $runId)" in text
+    assert "CandidateRow::optionalColumns($c, $skuKey, $runId, $sheetKey)" in text
 
 
 def test_catalog_reject_with_research_leaves_saving_the_fresh_candidates_to_the_server():

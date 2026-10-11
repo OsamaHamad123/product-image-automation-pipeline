@@ -22,6 +22,13 @@ class HealthController extends Controller
     public const CACHE_SECONDS = 60;
     /** «دقة الاقتراحات الحقيقية»: review_stats.lanes، بنفس تخزين ops_health المؤقت. */
     public const LANES_CACHE_KEY = 'review_lanes_v3';
+
+    /** ops_health and the review lanes as read from the old sheet's rows: forgotten after a new sheet is saved. */
+    public static function forgetCaches(): void
+    {
+        Cache::forget(self::CACHE_KEY);
+        Cache::forget(self::LANES_CACHE_KEY);
+    }
     public const LANES = ['strict', 'unsure', 'other'];
 
     /** آخر أسطر السجل التي تُرسل للصفحة، وأقصى ما يُقرأ من نهاية الملف. */

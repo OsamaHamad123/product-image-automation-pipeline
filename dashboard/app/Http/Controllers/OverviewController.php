@@ -65,6 +65,8 @@ class OverviewController extends Controller
             'todayAdmin' => $admin,
             'autoPublish' => $admin ? RunController::autoPublishState() : null,
             'sheetTab' => $admin ? RunController::sheetTab() : null,
+            // «الشيت: X · الورقة: Y» for both roles (the owner's links to «ربط الشيت»)
+            'sheetLine' => RunController::sheetLine($admin),
         ]);
     }
 

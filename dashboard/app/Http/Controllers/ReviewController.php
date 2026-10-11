@@ -125,6 +125,8 @@ class ReviewController extends Controller
             'bg' => $dbOnline ? self::bgConfig() : null,
             // وضع «فحص القص» (cutout.js): مساراته وعلاماته؛ null للمراجع = ما في زر «فحص القص» بالتبديل
             'cutout' => $reviewer ? null : RecutController::cutoutConfig(),
+            // «الشيت: X · الورقة: Y» تحت العنوان (R.sheetLine): رابط «ربط الشيت» للمالك، نص بس للمراجع
+            'sheet' => RunController::sheetLine(!$reviewer),
         ];
         // المراجع (ReviewerLimits): بلا روابط وأزرار المدير. رابط فاضي = الشاشة ما بترسم زرّه
         if ($reviewer) {
@@ -171,7 +173,8 @@ class ReviewController extends Controller
                 if (Schema::hasColumn('automation_queue', 'trace_json')) {
                     $columns = array_merge($columns, self::explainColumns());
                 }
-                $raw = DB::table('automation_queue')
+                // the current sheet's rows only (the same rows as the badge: QueueStats::queue)
+                $raw = QueueStats::queue()
                     ->whereIn('status', self::QUEUE_STATUSES)
                     ->orderBy('row_number')
                     ->get($columns)

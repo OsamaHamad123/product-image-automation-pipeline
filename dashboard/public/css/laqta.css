@@ -484,6 +484,14 @@ html:has(.lq-body) {
 .lq-text--info { color: var(--lq-text-info); }
 .lq-text--muted { color: var(--lq-text-muted); }
 
+/* «الشيت: X · الورقة: Y» (components/lq/sheet-line): a small line; a long sheet name wraps */
+.lq-sheet-line {
+    margin: 0;
+    font-size: var(--lq-fs-xs);
+    line-height: var(--lq-lh-base);
+    overflow-wrap: anywhere;
+}
+
 /* A section, alert or button a script hides with the hidden attribute stays hidden, whatever display its
    component gives it (was repeated per page: home, run, setup). */
 .lq-body [hidden] {

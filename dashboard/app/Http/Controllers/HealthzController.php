@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Services\SheetScope;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -84,10 +85,14 @@ class HealthzController extends Controller
                 Log::warning('healthz: run_history unreadable (' . get_class($e) . ')');
             }
             try {
-                $row = DB::selectOne(self::SQL_DEAD);
+                // the current sheet's writes (SheetScope: every write before sheet_key exists or while it is unknown)
+                $dead = [];
+                $row = DB::selectOne(self::SQL_DEAD . SheetScope::sql('sheet_updates', $dead), $dead);
                 $facts['dead_total'] = (int) ($row->total ?? 0);
                 $facts['dead_recent'] = (int) ($row->recent ?? 0);
-                $facts['conflict_recent'] = (int) (DB::selectOne(self::SQL_CONFLICT)->recent ?? 0);
+                $conflict = [];
+                $facts['conflict_recent'] = (int) (DB::selectOne(self::SQL_CONFLICT
+                    . SheetScope::sql('sheet_updates', $conflict), $conflict)->recent ?? 0);
             } catch (\Throwable $e) {
                 Log::warning('healthz: sheet_updates unreadable (' . get_class($e) . ')');
             }

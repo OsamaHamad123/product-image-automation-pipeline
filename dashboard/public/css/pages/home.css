@@ -60,6 +60,11 @@
     min-width: 0;
 }
 
+/* «الشيت: X · الورقة: Y» right under the «التشغيل» title */
+.lq-today-run__sheet {
+    margin-block-start: calc(-1 * var(--lq-space-2));
+}
+
 /* «أدوات الشيت»: one raised card, a row of ARIA tabs, one tool panel shown at a time. A #run-… jump scrolls the card
    (run.js) and leaves a little room above it. */
 .lq-today-tools {

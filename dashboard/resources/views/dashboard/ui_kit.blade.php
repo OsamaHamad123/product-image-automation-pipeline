@@ -600,6 +600,8 @@
 
             <h3 class="kit-sub">مفتاح التشغيل</h3>
             <div class="lq-row kit-row-wide">
+                <x-lq.sheet-line :line="['sheet' => 'automation sheet', 'tab' => 'Products', 'href' => '/system?tab=sheet']" />
+                <x-lq.sheet-line :line="['sheet' => '1NewShee…', 'tab' => 'أول ورقة', 'href' => '']" />
                 <x-lq.switch label="تفعيل النشر الآلي" />
                 <x-lq.switch label="عزل الخلفية" checked />
                 <x-lq.switch label="الرجوع للنظام القديم" disabled />

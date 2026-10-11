@@ -1,7 +1,8 @@
 {{--
     هيكل شاشة المراجعة قبل تشغيل السكربت: نفس تقسيم التصميم مع هياكل تحميل، وعدد «بانتظار المراجعة» من الخادم
     (نفس رقم الشارة). app.js يستبدل ما بداخل #rvApp بالواجهة الحية.
-    $config: ReviewController::page (mode, filter, row, canvas, db, readyForReview, urls, cutout)    $dbOnline: bool
+    $config: ReviewController::page (mode, filter, row, canvas, db, readyForReview, urls, cutout, sheet)    $dbOnline: bool
+    sheet: «الشيت: X · الورقة: Y» under the titles (RunController::sheetLine; app.js R.sheetLine draws it again)
     mode: single | bulk | cutout («فحص القص»، للمدير بس)
 --}}
 @php
@@ -29,9 +30,12 @@
         <section class="rv-bulk" aria-label="المراجعة بالجملة">
             <div class="rv-bulk__top">
                 <header class="rv-bulk__head">
-                    <div class="rv-bulk__titles">
-                        <h1 class="rv-bulk__h1">قائمة المراجعة</h1>
-                        <span class="rv-bulk__count">{{ $rvCount }}</span>
+                    <div class="rv-bulk__titlebox">
+                        <div class="rv-bulk__titles">
+                            <h1 class="rv-bulk__h1">قائمة المراجعة</h1>
+                            <span class="rv-bulk__count">{{ $rvCount }}</span>
+                        </div>
+                        <x-lq.sheet-line :line="$config['sheet'] ?? null" class="rv-sheetline" />
                     </div>
                 </header>
                 @unless ($dbOnline)
@@ -63,6 +67,8 @@
                         <h1 class="rv-queue__h1">قائمة المراجعة</h1>
                         <span class="rv-queue__count">{{ $rvCount }}</span>
                     </div>
+                    <x-lq.sheet-line :line="$config['sheet'] ?? null" class="rv-sheetline" />
+
                 </div>
                 <ul class="rv-list" aria-hidden="true">
                     @for ($i = 0; $i < 6; $i++)
