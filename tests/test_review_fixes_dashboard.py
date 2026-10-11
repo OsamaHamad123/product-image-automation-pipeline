@@ -260,7 +260,8 @@ def test_catalog_reject_with_research_leaves_saving_the_fresh_candidates_to_the_
     """Contract C2: reject_image with research=true saves the new candidates itself and puts the product back to
     ready_for_review (candidates_saved). The page saved them a second time through save-candidates, from its own copy."""
     single = review_js("single")
-    submit = single[single.index("async function rejectCurrent"):]
+    # the reject runs as a background job: its result is handled in researchSettled
+    submit = single[single.index("function researchSettled"):]
     submit = submit[: submit.index("function skip()")]
     assert "persistResearchCandidates" not in single
     assert "save-candidates" not in single and "saveCandidates" not in single
