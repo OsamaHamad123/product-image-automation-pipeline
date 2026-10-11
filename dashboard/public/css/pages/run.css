@@ -1,14 +1,8 @@
 /*
- * لقطة · التشغيل (Run board). Page-only styles on top of public/css/laqta.css tokens and classes.
- * Loaded by resources/views/dashboard/batch_automation.blade.php through @push('styles').
+ * لقطة · اليوم, the admin's «التشغيل» panel and «أدوات الشيت» (the old Run board). Page-only styles on top of
+ * public/css/laqta.css tokens and classes. Loaded by resources/views/dashboard/index.blade.php (admins only) through
+ * @push('styles'); the tools' tab strip and panels are in public/css/pages/home.css.
  */
-
-.lq-run {
-    display: flex;
-    flex-direction: column;
-    gap: var(--lq-page-gap);
-    min-width: 0;
-}
 
 .lq-run__grid {
     display: grid;
@@ -324,16 +318,7 @@
     color: var(--lq-text-3);
 }
 
-/* Sheet data quality and the analysis report, under the run cards */
-.lq-run__grid--tools {
-    grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
-}
-
-.lq-run-quality,
-.lq-run-export {
-    gap: var(--lq-space-3);
-}
-
+/* Sheet data quality and the analysis report: panels of «أدوات الشيت» */
 .lq-run-quality__head {
     display: flex;
     flex-wrap: wrap;
@@ -436,12 +421,7 @@
     color: var(--lq-success-ink);
 }
 
-/* Brands Mapping assistant: one card across the tools grid, one block per missing brand */
-.lq-run-brands {
-    grid-column: 1 / -1;
-    gap: var(--lq-space-3);
-}
-
+/* Brands Mapping assistant: a panel of «أدوات الشيت», one block per missing brand */
 .lq-run-brands__head {
     display: flex;
     flex-wrap: wrap;
@@ -644,11 +624,6 @@
 }
 
 /* «باركودات لقيناها من صفحات المتاجر» */
-.lq-run-barcodes {
-    grid-column: 1 / -1;
-    gap: var(--lq-space-3);
-}
-
 .lq-run-barcodes__list {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(min(100%, 300px), 1fr));
@@ -732,8 +707,7 @@
 }
 
 @media (max-width: 980px) {
-    .lq-run__grid,
-    .lq-run__grid--tools {
+    .lq-run__grid {
         grid-template-columns: minmax(0, 1fr);
     }
 
@@ -779,9 +753,4 @@
 
 .lq-run-handoff:not(:has(> :not([hidden]))) {
     display: none;
-}
-
-/* «روح على»: the sheet tools under the run cards, one click away */
-.lq-run__jump {
-    margin-block-end: var(--lq-space-1);
 }

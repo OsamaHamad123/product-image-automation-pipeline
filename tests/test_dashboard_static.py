@@ -44,7 +44,6 @@ CHANGED_PHP = [
 
 CHANGED_BLADES = [
     VIEWS / "dashboard" / "catalog.blade.php",
-    VIEWS / "dashboard" / "batch_automation.blade.php",
     VIEWS / "dashboard" / "index.blade.php",
     VIEWS / "dashboard" / "settings.blade.php",
     VIEWS / "dashboard" / "diagnostics.blade.php",
@@ -122,7 +121,7 @@ def test_review_scripts_parse(path):
 
 def test_contracts():
     catalog = review_page()
-    batch = read(VIEWS / "dashboard" / "batch_automation.blade.php")
+    batch = read(VIEWS / "dashboard" / "index.blade.php")      # «اليوم»: the old Run page is its run panel
     index = read(VIEWS / "dashboard" / "index.blade.php")
     settings = read(VIEWS / "dashboard" / "settings.blade.php")
     routes = read(DASH / "routes" / "web.php")
@@ -183,7 +182,7 @@ def test_fake_flows_removed():
     assert "function mutate" not in read(CONTROLLERS / "CurationController.php")
     assert "SelectiveSearchService" not in read(CONTROLLERS / "CurationController.php")
 
-    batch = read(VIEWS / "dashboard" / "batch_automation.blade.php")
+    batch = read(VIEWS / "dashboard" / "index.blade.php")      # «اليوم»: the old Run page is its run panel
     for gone in ("BRAND_STYLE_MISMATCH", "EventSource", "curation/stream", "autoApproveThreshold", "clip_score"):
         assert gone not in batch, gone
 
@@ -204,7 +203,7 @@ def test_fake_flows_removed():
 
 def test_views_do_not_inline_urls_in_handlers():
     """Candidate URLs/titles must not be interpolated into inline onclick handlers (stored XSS)."""
-    for path in [VIEWS / "dashboard" / "catalog.blade.php", VIEWS / "dashboard" / "batch_automation.blade.php",
+    for path in [VIEWS / "dashboard" / "catalog.blade.php", VIEWS / "dashboard" / "index.blade.php",
                  VIEWS / "review" / "shell.blade.php"] + REVIEW_JS:
         text = read(path)
         assert not re.search(r"onclick=\"[^\"]*\$\{[^}]*(url|title)", text, re.IGNORECASE), path.name

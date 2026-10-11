@@ -60,7 +60,7 @@ class SetupController extends Controller
 
     /** الرجوع لصفحة الإعدادات: مفاتيح وتبويب المعالجة. */
     public const KEYS_HREF = '/settings?tab=keys';
-    public const BRANDS_HREF = '/batch-automation#run-brands';
+    public const BRANDS_HREF = '/#run-brands';
 
     /** ملاحظة كلفة زر فحص المفاتيح (نفس فحص الاتصالات بصفحة الصحة). */
     public const KEYS_TEST_NOTE = 'بيكلّف بحث صور واحد وطلب عزل خلفية واحد، وما بياخد أكتر من 45 ثانية.';
@@ -681,13 +681,13 @@ class SetupController extends Controller
             return self::step('run', 'ok', 'خلص التشغيل: راجع الصور اللي لقيناها واعتمد الصح.', $rows, $review);
         }
         if ($current && in_array($outcome, self::RUN_FAILED, true)) {
-            $rows = [self::row('last', 'آخر تشغيل', $card['title'], 'danger', 'شوف شو صار بصفحة التشغيل، وبعدين جرّب أول تشغيل من هون.',
-                '/batch-automation', 'صفحة التشغيل')];
+            $rows = [self::row('last', 'آخر تشغيل', $card['title'], 'danger', 'شوف شو صار بـ«التشغيل الحالي» عالصفحة «اليوم»، وبعدين جرّب أول تشغيل من هون.',
+                '/#run-current', 'التشغيل الحالي')];
             return self::step('run', 'fail', 'آخر تشغيل ما خلص منيح.', $rows, $review);
         }
         if ($startedAt !== null) {
             $rows = [self::row('last', 'أول تشغيل', 'بلّش للصفوف ' . $review['started_rows'], 'info',
-                'التقدم بيبين هون وبصفحة التشغيل.', '/batch-automation', 'صفحة التشغيل')];
+                'التقدم بيبين هون وبـ«التشغيل الحالي» عالصفحة «اليوم».', '/#run-current', 'التشغيل الحالي')];
             return self::step('run', 'running', 'أول تشغيل بلّش: خليه يخلص وبعدين راجع الصور.', $rows, $review);
         }
         $rows = [self::row('last', 'أول تشغيل', 'لسا ما في تشغيل', 'muted', 'اضغط «جهّز أول تشغيل».')];

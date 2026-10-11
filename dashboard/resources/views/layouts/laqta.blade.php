@@ -16,17 +16,16 @@
     Roles (users.role, ReviewerLimits): a reviewer gets no admin nav item ('admin' => true) and no run-card link;
     <body data-lq-role="reviewer"> hides any element marked data-lq-admin (pages tag their admin-only buttons with it).
 
-    The sidebar run card and the review badge poll GET /api/batch-status every 5 s (15 s on Run and Home, which poll
-    /api/run/live themselves; none while the tab is hidden). Pages can reuse that one poll instead of starting their
+    The sidebar run card and the review badge poll GET /api/batch-status every 5 s (15 s on «اليوم», which polls
+    /api/run/live itself; none while the tab is hidden). Pages can reuse that one poll instead of starting their
     own: window.Laqta.onRunStatus(fn) or the `lq:run-status` document event.
     At 980px and below the sidebar is a bottom tab bar: «حسابي» opens the name and «خروج» (the same logout form), and
     the owner's run tab carries a status dot.
 --}}
 @php
     $lqNavItems = [
-        ['key' => 'home', 'route' => 'dashboard.index', 'label' => 'الرئيسية', 'icon' => 'home'],
+        ['key' => 'home', 'route' => 'dashboard.index', 'label' => 'اليوم', 'icon' => 'home'],
         ['key' => 'review', 'route' => 'dashboard.catalog', 'label' => 'المراجعة', 'icon' => 'review', 'badge' => true],
-        ['key' => 'run', 'route' => 'dashboard.batch_automation', 'label' => 'التشغيل', 'icon' => 'run', 'admin' => true],
         ['key' => 'health', 'route' => 'dashboard.diagnostics', 'label' => 'الصحة والتكلفة', 'short' => 'الصحة', 'icon' => 'health'],
         ['key' => 'settings', 'route' => 'dashboard.settings', 'label' => 'الإعدادات', 'icon' => 'settings', 'admin' => true],
     ];
@@ -94,8 +93,8 @@
                             @if (! empty($lqItem['badge']))
                                 <span class="lq-nav__badge" data-lq-review-count @if ($lqReviewSeed === null || $lqReviewSeed === 0) hidden @endif>{{ $lqReviewSeed }}</span>
                             @endif
-                            @if ($lqItem['key'] === 'run')
-                                {{-- نقطة حالة التشغيل بشريط الموبايل (الكرت الجانبي مخفي هناك): للمدير بس، والسكربت بيحدّثها مع /api/batch-status --}}
+                            @if ($lqItem['key'] === 'home' && ! $lqReviewer)
+                                {{-- نقطة حالة التشغيل على «اليوم» (فيها لوحة التشغيل) بشريط الموبايل (الكرت الجانبي مخفي هناك): للمدير بس، والسكربت بيحدّثها مع /api/batch-status --}}
                                 <span class="lq-nav__dot" data-lq-run-dot data-lq-admin data-state="loading" role="img" aria-label="حالة التشغيل: لحظة…"></span>
                             @endif
                         </a>

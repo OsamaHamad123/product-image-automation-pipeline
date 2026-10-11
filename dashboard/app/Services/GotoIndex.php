@@ -24,10 +24,9 @@ class GotoIndex
     public static function entries(bool $reviewer): array
     {
         $entries = [
-            ['الرئيسية', self::PAGES, '/', 'home overview', false],
+            ['اليوم', self::PAGES, '/', 'home overview today run', false],
             ['قائمة المراجعة (منتج واحد)', self::PAGES, '/catalog?mode=single', 'review single', false],
             ['المراجعة بالجملة', self::PAGES, '/catalog?mode=bulk', 'review bulk grid', false],
-            ['التشغيل', self::PAGES, '/batch-automation', 'run batch', true],
             ['الصحة والتكلفة', self::PAGES, '/system-diagnostics', 'health cost diagnostics', false],
             ['الإعدادات', self::PAGES, '/settings', 'settings', true],
             ['جهّز لقطة (خطوات أول مرة)', self::PAGES, '/setup', 'setup wizard onboarding', true],
@@ -41,12 +40,12 @@ class GotoIndex
             ['أعطال', self::REVIEW, '/catalog?filter=failed', 'failed errors retry', false],
             ['الخلفية لم تُعزل', self::REVIEW, '/catalog?filter=bg_failed', 'background', false],
 
-            ['تشغيل جديد', self::RUN, '/batch-automation#run-new', 'start run new', true],
-            ['التشغيل الحالي: إيقاف أو متابعة', self::RUN, '/batch-automation#run-current', 'stop pause resume progress', true],
-            ['ماركات ناقصة من جدول الماركات', self::RUN, '/batch-automation#run-brands', 'brands mapping missing', true],
-            ['باركودات من صفحات المتاجر', self::RUN, '/batch-automation#run-barcodes', 'barcode gtin', true],
-            ['جودة بيانات الشيت', self::RUN, '/batch-automation#run-quality', 'sheet quality typo', true],
-            ['تقرير للتحليل (تصدير التشغيل)', self::RUN, '/batch-automation#run-export', 'export report json', true],
+            ['تشغيل جديد', self::RUN, '/#run-new', 'start run new', true],
+            ['التشغيل الحالي: إيقاف أو متابعة', self::RUN, '/#run-current', 'run batch stop pause resume progress', true],
+            ['ماركات ناقصة من جدول الماركات', self::RUN, '/#run-brands', 'brands mapping missing', true],
+            ['باركودات من صفحات المتاجر', self::RUN, '/#run-barcodes', 'barcode gtin', true],
+            ['جودة بيانات الشيت', self::RUN, '/#run-quality', 'sheet quality typo', true],
+            ['تقرير للتحليل (تصدير التشغيل)', self::RUN, '/#run-export', 'export report json', true],
 
             ['الخدمات وفحص الاتصالات', self::HEALTH, '/system-diagnostics#services', 'services connections check serper gemini', false],
             ['فحص النشر', self::HEALTH, '/system-diagnostics#publish-check', 'publish check cloudinary', false],

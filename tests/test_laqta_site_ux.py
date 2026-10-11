@@ -61,10 +61,11 @@ def test_the_tab_bar_has_an_account_item_that_submits_the_logout_form():
     assert 'id="lq-account-sheet"' in sheet and "data-lq-account-sheet hidden" in sheet
     assert '<button class="lq-btn lq-btn--secondary lq-account-sheet__logout" type="submit" form="lqLogoutForm">خروج</button>' in sheet
     assert "auth()->user()->name" in sheet
-    # the dot sits in the run item only (a reviewer has no run item) and is admin-only in any case
-    dot = re.search(r"@if \(\$lqItem\['key'\] === 'run'\)\s*\{\{--.*?--\}\}\s*<span class=\"lq-nav__dot\" data-lq-run-dot data-lq-admin",
+    # the dot sits on «اليوم» (the run panel's page) for the owner only, and is admin-only in any case
+    dot = re.search(r"@if \(\$lqItem\['key'\] === 'home' && ! \$lqReviewer\)\s*\{\{--.*?--\}\}\s*<span class=\"lq-nav__dot\" data-lq-run-dot data-lq-admin",
                     layout, re.S)
     assert dot
+    assert "'key' => 'run'" not in layout                    # no «التشغيل» item: the run panel is on «اليوم»
 
 
 def test_the_account_item_and_the_dot_show_only_on_the_tab_bar():
@@ -237,7 +238,7 @@ def test_the_layout_poll_waits_while_hidden_and_feeds_the_dot():
 
 @NEEDS_NODE
 def test_the_layout_poll_backs_off_where_the_page_polls_the_run_itself():
-    out = _layout("nodes['[data-run-page]'] = new El('run-page');", r"""
+    out = _layout("nodes['[data-home-page]'] = new El('home-page');", r"""
 (async () => {
     await flush();
     console.log(JSON.stringify({ fetches: fetches.length, next: timers[0].ms }));

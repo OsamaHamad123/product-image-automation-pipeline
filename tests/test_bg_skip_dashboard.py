@@ -43,7 +43,7 @@ REVIEW_PHP = CONTROLLERS / "ReviewController.php"
 ROUTES = DASH / "routes" / "web.php"
 VIEWS = DASH / "resources" / "views"
 HEALTH_VIEW = VIEWS / "dashboard" / "diagnostics.blade.php"
-RUN_VIEW = VIEWS / "dashboard" / "batch_automation.blade.php"
+RUN_VIEW = VIEWS / "dashboard" / "index.blade.php"            # «اليوم»: the run panel
 PROCESSING_VIEW = VIEWS / "settings" / "processing.blade.php"
 HEALTH_JS = DASH / "public" / "js" / "health.js"
 SETTINGS_JS = DASH / "public" / "js" / "settings.js"
@@ -558,10 +558,10 @@ def test_without_the_database_the_endpoint_says_so(bg_app):
 
 
 def test_the_run_page_says_which_tab_the_run_reads(bg_app):
-    (plain,) = _kernel(bg_app["env"], [["GET", "/batch-automation", {}]])
+    (plain,) = _kernel(bg_app["env"], [["GET", "/", {}]])
     assert plain["status"] == 200 and "التشغيل بيقرأ من" in plain["body"] and 'data-run="sheet-tab"' in plain["body"]
     (proposals,) = _kernel(dict(bg_app["env"], SPREADSHEET_TAB_NAME="منتجات جديدة مقترحة 2"),
-                           [["GET", "/batch-automation", {}]])
+                           [["GET", "/", {}]])
     body = proposals["body"]
     assert "التشغيل بيقرأ من تبويب «منتجات جديدة مقترحة 2»" in body and 'data-suspicious="true"' in body
     assert "إذا مش تبويب منتجاتك، اختار التبويب الصح من الإعدادات" in body

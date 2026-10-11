@@ -330,7 +330,7 @@ def test_each_step_reports_its_live_check():
     ok = out["ok"]
     assert [s["status"] for s in ok["steps"]] == ["ok"] * 5 and ok["ready"] is True and ok["current"] is None
     assert _step(ok, "sheet")["rows"][-1]["state"] == "اسم المنتج والماركة موجودين"
-    assert _step(ok, "brands")["rows"][-1]["state"] == "42 ماركة" and _step(ok, "brands")["href"] == "/batch-automation#run-brands"
+    assert _step(ok, "brands")["rows"][-1]["state"] == "42 ماركة" and _step(ok, "brands")["href"] == "/#run-brands"
     run = _step(ok, "run")
     assert run["rows"][0]["href"] == "/catalog?mode=bulk" and "بانتظار المراجعة 4" in run["rows"][0]["fix"]
     # a check of another link does not describe the saved one

@@ -3,9 +3,9 @@
 * «روح لـ…» (public/js/jump.js, the layout's #lqGotoIndex from App\\Services\\GotoIndex): Ctrl+K or «/» from any page,
   every page, card, setting and review list in one search; digits open that row, any text searches the review list
   (/catalog?q=…); a reviewer's list has none of the owner's pages;
-* «روح على» (components/lq/jump-links): the Run and Health cards one click away; Health opens «تفاصيل متقدمة» for any
-  #id inside it (on load and on a hash change);
-* «رجّع وشغّل» in the review list: the rows go back to the queue and the Run page opens on those rows only
+* «روح على» (components/lq/jump-links): the Health cards one click away; Health opens «تفاصيل متقدمة» for any
+  #id inside it (on load and on a hash change). «اليوم» has no jump row: its sheet tools are tabs (#run-brands …);
+* «رجّع وشغّل» in the review list: the rows go back to the queue and the run panel opens on those rows only
   (?scope=rows&rows=…), «قبل ما تبدأ» prices them and «ابدأ» is the one click left;
 * the Health items for a key land on that key's row with its field open (?tab=keys#lq-key-serper);
 * the review list takes ?q= and searches SKU too; bulk mode has its own search; Enter approves a bulk card;
@@ -25,7 +25,7 @@ NEEDS_NODE = pytest.mark.skipif(NODE is None, reason="node is not installed")
 JUMP_JS = DASH / "public" / "js" / "jump.js"
 GOTO = DASH / "app" / "Services" / "GotoIndex.php"
 HEALTH_VIEW = DASH / "resources" / "views" / "dashboard" / "diagnostics.blade.php"
-RUN_VIEW = DASH / "resources" / "views" / "dashboard" / "batch_automation.blade.php"
+RUN_VIEW = DASH / "resources" / "views" / "dashboard" / "index.blade.php"      # «اليوم»: the run panel and the tools
 ATTENTION = DASH / "app" / "Http" / "Controllers" / "HealthAttentionController.php"
 
 
@@ -111,13 +111,14 @@ console.log(JSON.stringify({ afterTyping, typingPrevented: typing.defaultPrevent
 
 def test_goto_index_lists_every_hidden_tool_and_marks_the_owners_ones():
     goto = read(GOTO)
-    for href in ("/catalog?mode=cutout", "/setup", "/batch-automation#run-barcodes", "/batch-automation#run-export",
+    for href in ("/catalog?mode=cutout", "/setup", "/#run-barcodes", "/#run-export", "/#run-brands", "/#run-new",
                  "/system-diagnostics#search-ops", "/system-diagnostics#reprocess", "/system-diagnostics#eval-export",
                  "/catalog?filter=failed", "/catalog?mode=bulk"):
         assert f"'{href}'" in goto, href
     for owner in ("'/catalog?mode=cutout', 'cutout recut background', true", "'/setup', 'setup wizard onboarding', true",
-                  "'/batch-automation', 'run batch', true"):
+                  "'/#run-current', 'run batch stop pause resume progress', true"):
         assert owner in goto
+    assert "/batch-automation" not in goto                                      # it only redirects to «اليوم» now
     assert "'/settings?tab=keys#lq-key-' . $id" in goto and "SettingsController::TABS" in goto
 
 
@@ -133,7 +134,8 @@ def test_the_layout_carries_the_places_for_each_role(role_pages):
         assert re.search(r'<script src="[^"]*/js/jump\.js\?v=\d+"></script>', page)
         assert 'data-lq-goto-open' in page
     assert "/catalog?mode=cutout" in found["admin"] and "/settings?tab=keys#lq-key-serper" in found["admin"]
-    assert not any(h.startswith(("/batch-automation", "/settings", "/setup", "/catalog?mode=cutout", "/cutout-check")) for h in found["reviewer"])
+    assert not any(h.startswith(("/batch-automation", "/#run-", "/settings", "/setup", "/catalog?mode=cutout", "/cutout-check")) for h in found["reviewer"])
+    assert "/#run-brands" in found["admin"] and "/" in found["reviewer"]
     assert "/system-diagnostics#eval-export" not in found["reviewer"] and "/catalog?filter=failed" in found["reviewer"]
 
 
@@ -142,19 +144,24 @@ def test_the_layout_carries_the_places_for_each_role(role_pages):
 # ---------------------------------------------------------------------------
 
 def test_long_pages_have_jump_links_to_cards_that_exist():
-    for view in (HEALTH_VIEW, RUN_VIEW):
-        text = read(view)
-        links = re.search(r"<x-lq\.jump-links[^>]*:links=\"\[(.*?)\]\"", text, re.S)
-        assert links, view.name
-        for anchor in re.findall(r"\['#([a-z-]+)'", links.group(1)):
-            assert f'id="{anchor}"' in text, (view.name, anchor)
+    text = read(HEALTH_VIEW)
+    links = re.search(r"<x-lq\.jump-links[^>]*:links=\"\[(.*?)\]\"", text, re.S)
+    assert links, HEALTH_VIEW.name
+    for anchor in re.findall(r"\['#([a-z-]+)'", links.group(1)):
+        assert f'id="{anchor}"' in text, (HEALTH_VIEW.name, anchor)
+    # «اليوم»: no «روح على» row (the sheet tools are tabs); every tool tab names a panel that exists
+    today = read(RUN_VIEW)
+    assert "<x-lq.jump-links" not in today
+    for anchor in ("run-new", "run-current", "run-brands", "run-barcodes", "run-quality", "run-export"):
+        assert f'id="{anchor}"' in today or f"'{anchor}' =>" in today, anchor
 
 
 def test_health_items_for_a_key_land_on_that_key_and_run_items_on_their_card():
     attention = read(ATTENTION)
     assert "'href' => '/settings?tab=keys#lq-key-serper'" in attention
     assert "'href' => '/settings?tab=keys#lq-key-gemini'" in attention
-    assert "'href' => '/batch-automation'])" not in attention
+    assert "'/batch-automation" not in attention
+    assert "'href' => '/#run-new'" in attention and "'href' => '/#run-current'" in attention
     settings = read(DASH / "public" / "js" / "settings.js")
     assert "function openKeyFromHash()" in settings and "openKeyForm(m[1], true)" in settings
     health = read(DASH / "public" / "js" / "health.js")
@@ -281,6 +288,6 @@ console.log(JSON.stringify({
 }));
 """)
     assert out["failed"]["key"] == "failed" and out["failed"]["href"] == "/catalog?filter=failed"
-    assert out["reviewerDone"]["key"] == "done" and not out["reviewerDone"]["href"].startswith("/batch-automation")
+    assert out["reviewerDone"]["key"] == "done" and not out["reviewerDone"]["href"].startswith(("/batch-automation", "/#run-"))
     assert out["reviewerNotFound"]["href"] == "/catalog?filter=not_found"
     assert out["reviewerReview"]["key"] == "review"

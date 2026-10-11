@@ -29,11 +29,12 @@ CSS = DASH / "public" / "css"
 JS = DASH / "public" / "js"
 CONTROLLERS = DASH / "app" / "Http" / "Controllers"
 
-INDEX, DIAG, BATCH, SETUP = (PAGES / f"{n}.blade.php" for n in ("index", "diagnostics", "batch_automation", "setup"))
+INDEX, DIAG, SETUP = (PAGES / f"{n}.blade.php" for n in ("index", "diagnostics", "setup"))
+BATCH = INDEX                     # «اليوم»: the run panel and the sheet tools moved into the Home view
 HOME_CARD = VIEWS / "setup" / "home_card.blade.php"
-PAGE_CSS = {INDEX: "home.css", DIAG: "health.css", BATCH: "run.css", SETUP: "setup.css", HOME_CARD: "home.css"}
+PAGE_CSS = {INDEX: ("home.css", "run.css"), DIAG: ("health.css",), SETUP: ("setup.css",), HOME_CARD: ("home.css",)}
 SETTINGS_VIEWS = sorted(SETTINGS.glob("*.blade.php"))
-COPY_VIEWS = [DIAG, BATCH, SETUP, HOME_CARD] + SETTINGS_VIEWS
+COPY_VIEWS = [DIAG, INDEX, SETUP, HOME_CARD] + SETTINGS_VIEWS
 
 NODE = shutil.which("node")
 NEEDS_NODE = pytest.mark.skipif(NODE is None, reason="node is not installed")
@@ -89,7 +90,7 @@ def test_every_visible_hint_is_one_short_line(view):
 @pytest.mark.parametrize("view", COPY_VIEWS, ids=lambda p: p.name)
 def test_the_disclosures_are_native_and_use_defined_classes(view):
     text = read(view)
-    defined = _css_classes(CSS / "laqta.css", CSS / "pages" / PAGE_CSS.get(view, "settings.css"))
+    defined = _css_classes(CSS / "laqta.css", *(CSS / "pages" / n for n in PAGE_CSS.get(view, ("settings.css",))))
     for block in re.findall(r"<details\b.*?</details>", text, flags=re.S):
         assert "<summary" in block, (view.name, block[:80])
         for cls in re.findall(r'class="([^"]+)"', block):
@@ -127,11 +128,10 @@ def test_what_is_never_overwritten_stays_on_screen():
     assert "الصورة المنشورة بتضل مكانها لحد ما تعتمد غيرها" in hint
 
 
-def test_the_readiness_intro_says_it_plainly():
-    overview = read(CONTROLLERS / "OverviewController.php")
-    intro = overview[overview.index("'intro' =>"):overview.index("'brands' => array_slice")]
-    assert "مضمونة" not in intro
-    assert "مراجعة صحيحة بدون ولا غلطة" in intro
+def test_the_readiness_card_left_the_home_page():
+    # «جاهزية النشر الآلي» lives in Settings › النشر الآلي; «اليوم» neither shows nor computes it
+    assert "جاهزية النشر الآلي" not in read(INDEX)
+    assert "function readiness(" not in read(CONTROLLERS / "OverviewController.php")
 
 
 # ---------------------------------------------------------------------------
@@ -231,7 +231,7 @@ $('review-link').setAttribute('href', 'http://127.0.0.1:8000/catalog?mode=bulk')
 const out = [];
 renderNext({ key: 'review', title: 't', text: 'x', action: 'a', href: '/catalog?mode=bulk' });
 out.push($('review-link').hidden);
-renderNext({ key: 'brands', title: 't', text: 'x', action: 'a', href: '/batch-automation#run-brands' });
+renderNext({ key: 'brands', title: 't', text: 'x', action: 'a', href: '/#run-brands' });
 out.push($('review-link').hidden);
 renderNext(null);
 out.push($('review-link').hidden);

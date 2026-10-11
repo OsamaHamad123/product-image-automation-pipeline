@@ -120,9 +120,11 @@ console.log(JSON.stringify({
 """)
     assert out["review"]["title"] == "38 صورة جاهزة للمراجعة." and out["review"]["href"] == "/catalog?mode=bulk"
     assert out["unknown"] is None and out["waitBrands"] is None          # never a guess while a number is unknown
-    assert out["brands"]["title"] == "5 ماركات ناقصة من جدول الماركات." and out["brands"]["href"] == "/batch-automation#run-brands"
+    assert out["brands"]["title"] == "5 ماركات ناقصة من جدول الماركات." and out["brands"]["href"] == "/#run-brands"
     assert out["brandsDown"]["key"] == "not_found" and out["brandsDown"]["href"] == "/catalog?filter=not_found"
     assert out["running"]["key"] == "running" and out["run"]["action"] == "ابدأ تشغيل"
+    # «اليوم» holds the run panel: the steps scroll to its cards
+    assert out["running"]["href"] == "/#run-current" and out["run"]["href"] == "/#run-new"
 
 
 DUBAI = r"""

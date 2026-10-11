@@ -77,8 +77,7 @@ REQUIRED_CLASSES = [
     "lq-empty", "lq-skeleton",
 ]
 
-NAV_ROUTES = ["dashboard.index", "dashboard.catalog", "dashboard.batch_automation", "dashboard.diagnostics",
-              "dashboard.settings"]
+NAV_ROUTES = ["dashboard.index", "dashboard.catalog", "dashboard.diagnostics", "dashboard.settings"]
 
 CLASS_RE = re.compile(r"(?<![\w-])lq-[a-z0-9]+(?:(?:__|--|-)[a-z0-9]+)*")
 CSS_CLASS_RE = re.compile(r"\.(lq-[a-z0-9]+(?:(?:__|--|-)[a-z0-9]+)*)")
@@ -249,8 +248,10 @@ def test_layout_is_arabic_rtl_shell():
     assert '<meta name="csrf-token" content="{{ csrf_token() }}">' in layout
     for directive in ("@yield('content')", "@stack('styles')", "@stack('scripts')"):
         assert directive in layout, directive
-    for text in ("لقطة", "استوديو صور المنتجات", "الرئيسية", "المراجعة", "التشغيل", "الصحة والتكلفة", "الإعدادات"):
+    for text in ("لقطة", "استوديو صور المنتجات", "اليوم", "المراجعة", "الصحة والتكلفة", "الإعدادات"):
         assert text in layout, text
+    # «اليوم» merged the Home and Run pages: no «التشغيل» destination, no «الرئيسية» label
+    assert "'dashboard.batch_automation'" not in layout and "'label' => 'الرئيسية'" not in layout
     positions = [layout.index(f"'route' => '{name}'") for name in NAV_ROUTES]
     assert positions == sorted(positions), "nav order must follow the designs"
     assert "request()->routeIs(" in layout and 'aria-current="page"' in layout

@@ -110,7 +110,8 @@ class ReviewController extends Controller
                 'retry' => url('/api/failures/retry'),
                 'imageProxy' => url('/api/image-proxy'),
                 'export' => route('dashboard.rich_catalog.export'),
-                'run' => route('dashboard.batch_automation'),
+                // «اليوم» (/): the run panel; review/*.js adds ?scope=rows&rows=… or #run-brands to it
+                'run' => rtrim(route('dashboard.index'), '/') . '/',
                 // «افحص النشر» بلوحة الاعتمادات اللي ما مشيت: بطاقة «فحص النشر» بصفحة الصحة
                 'publishCheck' => route('dashboard.diagnostics') . '#publish-check',
                 // «تجاوز عزل الخلفية» بنفس اللوحة (رصيد أو مفتاح أو حصة PhotoRoom / remove.bg): SettingsController::setBgMethod

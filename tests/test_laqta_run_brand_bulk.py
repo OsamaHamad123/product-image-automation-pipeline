@@ -127,7 +127,7 @@ def test_the_bulk_routes_and_hooks_are_registered():
                  "Route::post('/api/run/brand-bulk-add', [RunController::class, 'brandBulkAdd']);",
                  "Route::post('/api/run/brand-undo', [RunController::class, 'brandUndo']);"):
         assert line in routes
-    view = (DASH / "resources" / "views" / "dashboard" / "batch_automation.blade.php").read_text(encoding="utf-8")
+    view = (DASH / "resources" / "views" / "dashboard" / "index.blade.php").read_text(encoding="utf-8")
     for hook in ("bulk", "bulk-open", "bulk-panel", "bulk-lead", "bulk-tools", "bulk-sites", "bulk-sites-note",
                  "bulk-list", "bulk-foot", "bulk-approve", "bulk-count", "bulk-added", "bulk-error", "bulk-done"):
         assert f'data-run="{hook}"' in view

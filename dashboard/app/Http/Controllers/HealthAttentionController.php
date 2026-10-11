@@ -119,7 +119,7 @@ class HealthAttentionController extends Controller
                     : ($dead === 2 ? 'رابطين' : $dead . ($dead <= 10 ? ' روابط' : ' رابط')) . ' ما وصلوا للشيت',
                 'الكتابة بالشيت ما زبطت بعد كل المحاولات بآخر ' . HealthzController::DEAD_WINDOW_DAYS . ' أيام. '
                 . 'تشغيل جديد بيرجع يكتب روابط الصور المعتمدة بدون ما يدوّر من جديد.',
-                ['label' => 'تشغيل جديد', 'href' => '/batch-automation#run-new']);
+                ['label' => 'تشغيل جديد', 'href' => '/#run-new']);
         }
 
         // كتابات رفضها الشيت لأنه الصف أو العمود تغيّر بعد ما انجدولت (صفوف انزاحت، تبويب انرجع من نسخة، عمود انمسح):
@@ -131,7 +131,7 @@ class HealthAttentionController extends Controller
                 'الصف أو العمود ما عاد متل ما كان وقت الاعتماد (صفوف انزاحت، تبويب انرجع من نسخة، أو عمود انمسح)، '
                 . 'فما كتبنا فوق شي ما منعرفه. التشغيل الجاي بيرجع يكتب روابط الصور المعتمدة لحاله؛ الأوصاف والتصنيفات '
                 . 'بتنكتب لما تنعتمد الصورة من جديد.',
-                ['label' => 'تشغيل جديد', 'href' => '/batch-automation#run-new']);
+                ['label' => 'تشغيل جديد', 'href' => '/#run-new']);
         }
 
         $free = $healthz['free_gb'] ?? null;
@@ -148,11 +148,11 @@ class HealthAttentionController extends Controller
             $card = HealthController::lastRunCard($run);
             $items[] = self::item('last_run', 'danger', 'آخر تشغيل ما خلص منيح',
                 $card['title'] . ($card['when'] !== '' ? ' (' . $card['when'] . ')' : '') . '. شوف شو صار وشغّل من جديد.',
-                ['label' => 'شوف آخر تشغيل', 'href' => '/batch-automation#run-current']);
+                ['label' => 'شوف آخر تشغيل', 'href' => '/#run-current']);
         } elseif ($outcome === 'stopped' && ($run['stop_reason'] ?? '') === 'budget_reached') {
             $items[] = self::item('spend', 'warning', 'آخر تشغيل وقف لأنو صرف اليوم وصل للميزانية اليومية',
                 'المنتجات الباقية بتستنى بالطابور وبتكمّل بتشغيل بكرا لحالها.',
-                ['label' => 'شوف آخر تشغيل', 'href' => '/batch-automation#run-current']);
+                ['label' => 'شوف آخر تشغيل', 'href' => '/#run-current']);
         }
 
         if (($healthz['nightly_known'] ?? false) && is_int($healthz['nightly_age_s'] ?? null)

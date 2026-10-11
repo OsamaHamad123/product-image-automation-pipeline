@@ -129,7 +129,7 @@ def test_a_reviewer_sees_no_admin_links(env):
     for page in (as_reviewer, as_admin):
         assert page["status"] == 200
     assert 'data-lq-role="reviewer"' in as_reviewer["body"]
-    for link in ("/settings", "/batch-automation"):
+    for link in ("/settings", "#run-current"):      # the run panel on «اليوم» (sidebar run card, «روح لـ…»)
         assert f'{link}"' not in as_reviewer["body"]
         assert f'{link}"' in as_admin["body"]
     # the review screen's config (data-config, HTML-escaped JSON): no «back to the queue» for a reviewer

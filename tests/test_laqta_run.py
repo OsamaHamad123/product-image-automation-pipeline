@@ -28,8 +28,8 @@ from blade_scripts import inline_scripts
 ROOT = Path(__file__).resolve().parents[1]
 DASH = ROOT / "dashboard"
 VIEWS = DASH / "resources" / "views"
-HOME = VIEWS / "dashboard" / "index.blade.php"
-RUN = VIEWS / "dashboard" / "batch_automation.blade.php"
+# «اليوم» (/): the old Home and Run pages are one view; /batch-automation redirects to it
+HOME = RUN = VIEWS / "dashboard" / "index.blade.php"
 JS = DASH / "public" / "js"
 COMMON_JS, RUN_JS, HOME_JS = JS / "run-common.js", JS / "run.js", JS / "home.js"
 HOME_CSS, RUN_CSS = DASH / "public" / "css" / "pages" / "home.css", DASH / "public" / "css" / "pages" / "run.css"
@@ -46,7 +46,7 @@ NEEDS_NODE = pytest.mark.skipif(NODE is None, reason="node is not installed")
 NEEDS_LARAVEL = pytest.mark.skipif(PHP is None or not VENDOR_AUTOLOAD.exists(),
                                    reason="php or dashboard/vendor is not installed")
 
-PAGE_FILES = [HOME, RUN, COMMON_JS, RUN_JS, HOME_JS, HOME_CSS, RUN_CSS]
+PAGE_FILES = [HOME, COMMON_JS, RUN_JS, HOME_JS, HOME_CSS, RUN_CSS]
 RAW_CODES = ["REVIEW_PRESELECTED", "REVIEW_UNSELECTED", "NO_RESULTS", "PROVIDER_DOWN", "SEARCH_ERROR",
              "ALL_CONFLICTED", "SERPER_CREDIT", "GEMINI_DOWN", "VERIFIER_NOT_CONFIGURED", "vlm:", "T1"]
 
@@ -59,20 +59,20 @@ def read(path: Path) -> str:
 # Structure
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("path, nav, title", [(HOME, "home", "الرئيسية"), (RUN, "run", "التشغيل")],
-                         ids=["home", "run"])
-def test_pages_extend_the_laqta_layout(path, nav, title):
-    text = read(path)
+def test_pages_extend_the_laqta_layout():
+    text = read(HOME)
     assert "@extends('layouts.laqta')" in text and "layouts.layout'" not in text
-    assert f"@section('title', '{title}')" in text and f"@section('lq_nav', '{nav}')" in text
+    assert "@section('title', 'اليوم')" in text and "@section('lq_nav', 'home')" in text
     assert "@push('styles')" in text and "@push('scripts')" in text
     # page script and style are local files; no inline executable script, nothing from another host
     assert not inline_scripts(text)
     assert not re.search(r"(?:href|src)=\"(?:https?:)?//", text)
+    # run.js (the run panel, the page's one /api/run/live poller) before home.js, which follows its snapshots
     scripts = re.findall(r"asset\('js/([a-z-]+\.js)'\)", text)
-    assert scripts == ["run-common.js", "home.js" if nav == "home" else "run.js"]
-    # the initial snapshot is JSON data, escaped by @json
-    assert f'<script type="application/json" id="lq-{nav}-initial">@json($live)</script>' in text
+    assert scripts == ["run-common.js", "run.js", "home.js"]
+    assert not (VIEWS / "dashboard" / "batch_automation.blade.php").exists()
+    # one initial snapshot, JSON data escaped by @json, read by both scripts
+    assert text.count('<script type="application/json" id="lq-home-initial">@json($live)</script>') == 1
 
 
 def test_no_user_chip_and_no_raw_codes_as_text():
@@ -97,7 +97,7 @@ def test_every_hook_the_scripts_use_exists_in_the_page():
     missing = (_hooks(read(HOME_JS), r"\$") | _hooks(read(HOME_JS), r"\$\$")) - set(re.findall(r'data-home="([a-z-]+)"', home))
     assert not missing, sorted(missing)
     assert "data-run-page" in run and "data-home-page" in home
-    assert "getElementById('lq-run-initial')" in read(RUN_JS) and 'id="lq-run-initial"' in run
+    assert "getElementById('lq-home-initial')" in read(RUN_JS) and 'id="lq-home-initial"' in run
     assert "getElementById('lq-home-initial')" in read(HOME_JS) and 'id="lq-home-initial"' in home
 
 
@@ -114,13 +114,13 @@ def _css_classes(*paths):
 
 def test_classes_and_tokens_exist():
     defined = _css_classes(LAQTA_CSS, HOME_CSS, RUN_CSS)
-    for path in (HOME, RUN, COMMON_JS, RUN_JS, HOME_JS):
+    for path in (HOME, COMMON_JS, RUN_JS, HOME_JS):
         text = read(path)
         # 'lq-page-home' / 'lq-page-run' are body classes; ids and hooks are not classes
         used = {c for c in CLASS_RE.findall(text)
-                if not c.startswith(("lq-run-initial", "lq-home-initial", "lq-run-new-title", "lq-run-current-title",
-                                     "lq-run-rows", "lq-home-funnel-title", "lq-home-lastrun-title",
-                                     "lq-home-ready-title", "lq-home-services-title"))}
+                if not c.startswith(("lq-home-initial", "lq-run-new-title", "lq-run-current-title",
+                                     "lq-run-rows", "lq-home-funnel-title", "lq-today-run-title",
+                                     "lq-today-tools-title"))}
         used = {c.rstrip("-") for c in used}
         # classes built at runtime: 'lq-chip--' + status, 'lq-stat--' + tone, 'lq-tone--' + tone, 'lq-dot--' + tone
         used -= {"lq-chip", "lq-stat", "lq-tone", "lq-dot", "lq-kpi__note", "lq-legend__swatch lq-tone"}
@@ -506,56 +506,16 @@ def test_estimates_and_auto_publish_text():
     assert out["defaults"] == [20.0, 0.003]
 
 
-@NEEDS_PHP
-def test_readiness_uses_review_stats():
-    import local_cache_db
-
-    rows = []
-    for i in range(12):
-        rows.append({"id": i + 1, "created_at": f"2026-09-01 10:{i:02d}:00", "action": "approved", "sku_key": f"alali-{i}",
-                     "brand": "AL ALALI", "image_url": f"https://x.ae/{i}.jpg", "was_preselected": 1,
-                     "engine_decision": "REVIEW_PRESELECTED"})
-    for i in range(4):
-        rows.append({"id": 100 + i, "created_at": f"2026-09-02 10:{i:02d}:00",
-                     "action": "approved" if i else "rejected", "sku_key": f"virg-{i}", "brand": "VIRGINIA",
-                     "image_url": f"https://x.ae/v{i}.jpg", "was_preselected": 1, "engine_decision": "REVIEW_PRESELECTED",
-                     "reason_code": "WRONG_SIZE" if not i else None})
-    stats = dict({"status": "success"}, **local_cache_db.review_stats(rows))
-    out = _php(f"$out = OverviewController::readiness({php_value(stats)});")
-    assert out["bar_pct"] == round(stats["thresholds"]["min_lower_bound"] * 100)
-    assert out["perfect_record_reviews"] == stats["thresholds"]["perfect_record_reviews"]
-    assert f"حوالي {out['perfect_record_reviews']} مراجعة صحيحة بدون ولا غلطة" in out["intro"]
-    brands = {b["brand"]: b for b in out["brands"]}
-    alali = next(b for b in stats["brands"] if b["brand"] == "AL ALALI")
-    assert brands["AL ALALI"]["text"] == f"12 مراجعة صحيحة · مضمون {int(alali['lower_bound'] * 100)}%"
-    assert brands["AL ALALI"]["pct"] == pytest.approx(round(12 / alali["reviews_needed"] * 100, 1))
-    virginia = next(b for b in stats["brands"] if b["brand"] == "VIRGINIA")
-    assert brands["VIRGINIA"]["tone"] == ("danger" if virginia["status"] == "low_precision" or virginia["reviews_needed"] is None
-                                          else "teal")
-    assert brands["VIRGINIA"]["text"].startswith("3 من 4 صحيحة")            # a rejected pick is never hidden
-    for b in out["brands"]:
-        assert not re.search(r"[a-z]+_[a-z]+", b["text"]), b["text"]         # no status codes in the text
 
 
 @NEEDS_PHP
-def test_services_greeting_date_and_alerts():
-    diag = {"checked_at": "2026-09-30T09:40:00+00:00", "services": {
-        "google_sheets": {"status": "online"}, "serper": {"status": "offline"}, "gemini": {"status": "disabled"},
-        "photoroom": {"status": "online"}, "cloudinary": {"status": "online"}, "proxy": {"status": "offline"}}}
+def test_greeting_date_and_alerts():
     alerts = [{"code": "SERPER_CREDIT", "message": "رصيد Serper انتهى أو المفتاح مرفوض", "detail": "quota / 401 / 403"},
               {"code": "GEMINI_DOWN", "message": "Gemini لا يستجيب"}, {"code": "X", "message": ""}]
-    out = _php(f"$out['s'] = OverviewController::services({php_value(diag)});\n"
-               "$out['none'] = OverviewController::services(null);\n"
-               "$out['g'] = [OverviewController::greeting(9), OverviewController::greeting(15, 'سارة'),"
+    out = _php("$out['g'] = [OverviewController::greeting(9), OverviewController::greeting(15, 'سارة'),"
                " OverviewController::greeting(2)];\n"
                "$out['d'] = OverviewController::dateLine(3, 30, 9);\n"
                f"$out['a'] = OverviewController::alerts({php_value(alerts)});")
-    items = {i["key"]: (i["name"], i["label"], i["tone"]) for i in out["s"]["items"]}
-    assert items == {"google_sheets": ("Google Sheet", "متصل", "success"), "serper": ("Serper", "ما بيرد", "danger"),
-                     "gemini": ("Gemini", "مش مفعّل", "muted"), "photoroom": ("PhotoRoom", "يعمل", "success"),
-                     "cloudinary": ("Cloudinary", "يعمل", "success")}
-    assert out["s"]["checked_at"] == int(datetime(2026, 9, 30, 9, 40, tzinfo=timezone.utc).timestamp())
-    assert out["none"] == {"checked_at": None, "items": [], "text": "ما انعمل فحص بعد"}
     assert out["g"] == ["صباح الخير", "مسا الخير يا سارة", "مسا الخير"]
     assert out["d"] == "الأربعاء، 30 أيلول"
     assert [a["title"] for a in out["a"]] == ["رصيد Serper انتهى أو المفتاح مرفوض", "Gemini لا يستجيب"]
@@ -830,9 +790,6 @@ def test_home_views_are_truthful():
                 "sheet": {"status": "ok", "total": 11, "stages": [{"key": "published", "label": "منشورة", "value": 2, "tone": "teal"},
                                                                   {"key": "not_searched", "label": "لسا ما انبحث عنها", "value": 9, "tone": "empty"}],
                           "notes": ["منتج واحد بانتظار المراجعة صفوفه مش موجودة بالشيت"]},
-                "readiness": {"status": "ok", "intro": "…98%…", "brands": []},
-                "cost": {"status": "ok", "week_usd": 0.41},
-                "services": {"checked_at": None, "items": [], "text": "ما انعمل فحص بعد"},
                 "alerts": [{"title": "رصيد Serper انتهى أو المفتاح مرفوض", "text": "البحث واقف"},
                            {"title": "Gemini لا يستجيب", "text": "كلها لمراجعتك"}]}
     out = _node(_js(COMMON_JS, HOME_JS) + f"""
@@ -854,17 +811,16 @@ console.log(JSON.stringify({{ ov, failed, down, summary, empty, banners }}));
     assert [k["value"] for k in ov["kpis"]] == ["3", "2", "—", "0"]              # null is «—», never 0
     assert ov["funnel"]["meta"] == "11 منتج" and ov["funnel"]["notes"]
     assert [s["pct"] for s in ov["funnel"]["segments"]] == [18.2, 81.8]
-    assert ov["cost"]["text"] == "$0.41" and ov["services"]["checkedText"] == "ما انعمل فحص بعد"
-    assert ov["readiness"]["state"] == "empty" and "لسا ما في مراجعات كفاية" in ov["readiness"]["message"]
+    # «جاهزية النشر الآلي» (Settings), the services and the week's cost (Health) are not on «اليوم»
+    assert not {"readiness", "cost", "services"} & set(ov)
     failed = out["failed"]
     assert failed["state"] == "error" and all(k["value"] == "—" for k in failed["kpis"])
-    assert failed["funnel"]["state"] == "error" and failed["cost"]["text"] == "—"
-    assert out["down"]["waiting"] is None and out["down"]["lastRun"]["mode"] == "unavailable"
+    assert failed["funnel"]["state"] == "error"
+    assert out["down"] == {"phase": None, "waiting": None, "banner": None}
+    # the finished run's summary and tiles are drawn once, by the run panel's «التشغيل الحالي» (run.js)
     s = out["summary"]
-    assert s["waiting"] == 33 and s["lastRun"]["mode"] == "summary"
-    assert s["lastRun"]["meta"].endswith("الصفوف 62–101 · 8 دقائق · $0.11")
-    assert [t["value"] for t in s["lastRun"]["tiles"]] == [13, 7, 2, 2]
-    assert out["empty"]["lastRun"]["mode"] == "empty" and out["empty"]["waiting"] == 0
+    assert s["waiting"] == 33 and s["phase"] == "review" and "lastRun" not in s
+    assert out["empty"]["waiting"] == 0 and out["empty"]["banner"] is None
     none, merged, ops = out["banners"]
     assert none["visible"] is False
     # the run already said the Serper problem: it is not repeated, the Gemini one is added
@@ -1029,14 +985,16 @@ def test_routes_and_the_old_review_tab_redirect(served):
     out, _ = served
     redirect = out["/batch-automation?tab=review"]
     assert redirect["status"] == 302 and redirect["location"].endswith("/catalog?mode=bulk")
-    for path in ("/", "/batch-automation"):
-        assert out[path]["status"] == 200, out[path]["body"][:2000]
-    home, run = out["/"]["body"], out["/batch-automation"]["body"]
-    assert "data-home-page" in home and 'class="lq-sidebar"' in home and "<title>الرئيسية · لقطة</title>" in home
-    assert "data-run-page" in run and "<title>التشغيل · لقطة</title>" in run
-    assert re.search(r'<a href="[^"]+/batch-automation"[^>]*aria-current="page"', run)
+    # the Run page is the run panel of «اليوم» now
+    moved = out["/batch-automation"]
+    assert moved["status"] == 302 and moved["location"].rstrip("/") == "http://localhost"
+    assert out["/"]["status"] == 200, out["/"]["body"][:2000]
+    home = out["/"]["body"]
+    assert "data-home-page" in home and "data-run-page" in home and 'class="lq-sidebar"' in home
+    assert "<title>اليوم · لقطة</title>" in home
+    assert re.search(r'<a href="http://localhost"[^>]*aria-current="page"', home)
     for leftover in ("{{", "{!!", "@props", "<x-lq", "@json"):
-        assert leftover not in home and leftover not in run, leftover
+        assert leftover not in home, leftover
     # the owner's name is escaped; there is no user chip
     assert "مسا الخير يا سارة &lt;b&gt;" in home or "صباح الخير يا سارة &lt;b&gt;" in home
     assert 'data-owner="سارة &lt;b&gt;"' in home
@@ -1078,9 +1036,8 @@ def test_every_number_has_one_source(served):
     assert "11" not in [str(r["row"]) for r in live["recent"]]              # still waiting: not a result
     assert all(r["href"] == f"/catalog?row={r['row']}" for r in live["recent"])
 
-    assert overview["cost"] == {"status": "ok", "week_usd": 0.05, "searches": 10}
     assert overview["alerts"][0]["title"] == "رصيد Serper انتهى أو المفتاح مرفوض"
-    assert overview["readiness"]["status"] == "ok" and overview["readiness"]["brands"] == []
+    assert not {"readiness", "cost", "services"} & set(overview)              # Settings and Health own them
 
 
 def test_plan_endpoint(served):
@@ -1095,13 +1052,13 @@ def test_plan_endpoint(served):
     assert "مقلوب" in json.loads(out["/api/run/plan?scope=rows&rows=9-3"]["body"])["error"]
     odd = out["/api/run/plan?scope[]=rows&rows[]=1"]                          # array parameters: the whole sheet
     assert odd["status"] == 200 and json.loads(odd["body"])["scope"] == "all"
-    # read-only: only the three read actions of the bridge were called
-    assert set(env["calls"].read_text().split()) <= {"get_products", "review_stats", "ops_health"}
+    # read-only: only the read actions of the bridge were called («اليوم» no longer asks review_stats)
+    assert set(env["calls"].read_text().split()) <= {"get_products", "ops_health"}
 
 
-def test_auto_publish_state_on_the_run_page(served):
+def test_auto_publish_state_on_the_run_panel(served):
     out, _ = served
-    run = out["/batch-automation"]["body"]
+    run = out["/"]["body"]
     assert "النشر الآلي شغّال لـ Almarai، Masafi" in run
     assert 'href="http://localhost/settings?tab=auto-publish"' in run
 
@@ -1121,17 +1078,17 @@ def test_unavailable_sources_are_said_never_zero(app_env):
     assert overview["sheet"]["status"] == "error" and "الشيت" in overview["sheet"]["message"]
     assert [overview["kpis"][k]["value"] for k in ("published", "not_found", "failed")] == [None, None, None]
     assert overview["kpis"]["waiting"]["value"] == 3                         # the database still answers
-    assert overview["readiness"]["status"] == "error" and overview["cost"]["status"] == "error"
+    assert overview["alerts"] == []
     plan = out["/api/run/plan?scope=all"]
     assert plan["status"] == 503 and json.loads(plan["body"])["error"] == "sheet_unavailable"
 
     db_down = dict(app_env["env"], DB_PORT="1")                              # nothing listens on port 1
-    out = _kernel(db_down, ["/api/run/live", "/api/overview", "/batch-automation", "/"])
+    out = _kernel(db_down, ["/api/run/live", "/api/overview", "/"])
     live = out["/api/run/live"]
     assert live["status"] == 503 and json.loads(live["body"])["error"] == "database_unavailable"
     overview = json.loads(out["/api/overview"]["body"])
     assert overview["review"]["status"] == "error" and overview["kpis"]["waiting"]["value"] is None
-    assert out["/batch-automation"]["status"] == 200 and out["/"]["status"] == 200
+    assert out["/"]["status"] == 200
     island = re.search(r'id="lq-home-initial">(.*?)</script>', out["/"]["body"], re.DOTALL).group(1)
     assert json.loads(island)["error"] == "database_unavailable"            # the embedded snapshot says why
     assert "قاعدة البيانات مش متاحة" in json.loads(island)["message"]
@@ -1166,7 +1123,7 @@ console.log(JSON.stringify(out));
 @NEEDS_NODE
 def test_run_progress_bar_fills_only_the_processed_rows():
     """«N من M» counts processed rows (QueueStats::runTotals). A row back in the queue after an outage is pending again;
-    filling it made the bar show 60% under «2 من 5» while the Home card and the sidebar showed 40%."""
+    filling it made the bar show 60% under «2 من 5» while the sidebar showed 40%."""
     snap = {"status": "success",
             "batch": _batch("running", is_running=True,
                             run={"run_id": "r2", "total": 5, "processed": 2, "ready_for_review": 1, "completed": 0,
@@ -1175,18 +1132,16 @@ def test_run_progress_bar_fills_only_the_processed_rows():
                                                                      "requeued": 1, "approved": 0, "searching": 1,
                                                                      "waiting": 1}),
             "recent": []}
-    out = _node(_js(COMMON_JS, RUN_JS, HOME_JS) + f"""
+    out = _node(_js(COMMON_JS, RUN_JS) + f"""
 const s = {json.dumps(snap, ensure_ascii=False)};
 const run = LaqtaRunPage.describeLive(s, 1790000000, 12).progress;
-const home = LaqtaHomePage.describeHomeLive(s, 1790000000).lastRun;
-console.log(JSON.stringify({{ run, home }}));
+console.log(JSON.stringify({{ run }}));
 """)
     run = out["run"]
     assert run["countsText"].startswith("2 من 5") and run["percent"] == 40
     assert sum(s["pct"] for s in run["segments"]) == pytest.approx(40)       # the fill is «2 من 5», not 60%
     assert sum(t["value"] for t in run["legend"]) == 2
     assert {t["label"]: t["value"] for t in run["legend"]}["أعطال مؤقتة"] == 1
-    assert out["home"]["percent"] == run["percent"]                          # the same run on both pages
 
 
 @NEEDS_NODE
@@ -1317,7 +1272,7 @@ const island = new El('script');
 globalThis.document = {
     readyState: 'loading', hidden: false,
     querySelector: (sel) => sel === '[data-run-page]' ? page : null,
-    getElementById: (id) => id === 'lq-run-initial' ? island : null,
+    getElementById: (id) => id === 'lq-home-initial' ? island : null,
     createElement: (t) => new El(t),
     createTextNode: (t) => { const n = new El('#text'); n._text = String(t); return n; },
     addEventListener() {}
@@ -1410,16 +1365,16 @@ def test_brand_select_counts_are_what_the_run_takes():
 
 
 def test_refresh_reads_past_every_server_cache(app_env):
-    """The end-of-run refresh (?refresh=1 from both pages) must reach the server: the review stats and ops_health are
-    read again although a minute-long cache holds them, and the sheet is read with sheetRows($refresh)."""
+    """The end-of-run refresh (?refresh=1) must reach the server: ops_health is read again although a cache holds it,
+    and the sheet is read with sheetRows($refresh). «اليوم» no longer reads review_stats (readiness is in Settings)."""
     paths = ["/api/overview", "/api/overview?again", "/api/overview?refresh=1"]
     _kernel(app_env["env"], paths)
     calls = app_env["calls"].read_text().split()
-    assert calls.count("review_stats") == 2 and calls.count("ops_health") == 2     # cached once, then read again
+    assert calls.count("review_stats") == 0 and calls.count("ops_health") == 2     # cached once, then read again
     run, overview = read(CONTROLLERS / "RunController.php"), read(CONTROLLERS / "OverviewController.php")
     assert "ProductController::sheetRows($request->boolean('refresh'), $error)" in run
     assert "ProductController::sheetRows($refresh, $error)" in overview
-    assert "self::reviewStats($refresh)" in overview and "self::opsHealth($refresh)" in overview
+    assert "reviewStats" not in overview and "self::opsHealth($refresh)" in overview
 
 
 def test_last_run_is_the_one_that_searched_last_not_the_one_reviewed_last(app_env):

@@ -219,7 +219,7 @@ def test_each_source_gives_an_item_with_its_fix():
     assert services["title"] == "Gemini وCloudinary ما ردّوا بآخر فحص للاتصالات"
     assert services["action"]["goto"] == "services" and "آخر فحص:" in services["text"]
     dead = out["dead"]["items"][0]
-    assert dead["title"] == "3 روابط ما وصلوا للشيت" and dead["action"]["href"] == "/batch-automation#run-new"
+    assert dead["title"] == "3 روابط ما وصلوا للشيت" and dead["action"]["href"] == "/#run-new"
     assert out["dead_old"]["items"] == [] and out["disk_unknown"]["items"] == [] and out["never"]["items"] == []
     # writes the sheet refused because a row or a column changed: a warning with what happens next, never silent
     conflict = out["conflict"]["items"][0]

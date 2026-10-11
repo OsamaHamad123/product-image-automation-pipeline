@@ -19,7 +19,7 @@ Route::get('/catalog', [ReviewController::class, 'page'])->name('dashboard.catal
 Route::get('/active-learning', [ProductController::class, 'activeLearning'])->name('dashboard.active_learning'); // p2-health: ← /settings?tab=auto-publish
 Route::get('/errors', [ProductController::class, 'errors'])->name('dashboard.errors'); // ← /catalog?filter=failed
 Route::get('/rich-catalog', [ProductController::class, 'richCatalog'])->name('dashboard.rich_catalog'); // ← /catalog
-Route::get('/batch-automation', [RunController::class, 'page'])->name('dashboard.batch_automation'); // p2-run: التشغيل (?tab=review -> /catalog?mode=bulk)
+Route::get('/batch-automation', [RunController::class, 'page'])->name('dashboard.batch_automation'); // 302 to «اليوم» / with the query (?tab=review -> /catalog?mode=bulk)
 Route::get('/system-diagnostics', [\App\Http\Controllers\HealthController::class, 'page'])->name('dashboard.diagnostics'); // p2-health: الصحة والتكلفة
 Route::get('/settings', [\App\Http\Controllers\SettingsController::class, 'show'])->name('dashboard.settings'); // p2-health: ?tab=
 Route::post('/settings', [\App\Http\Controllers\SettingsController::class, 'save'])->name('dashboard.save_settings'); // p2-health

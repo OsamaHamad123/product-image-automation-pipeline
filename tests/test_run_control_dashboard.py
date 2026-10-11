@@ -25,13 +25,13 @@ DASH = ROOT / "dashboard"
 VIEWS = DASH / "resources" / "views"
 CONTROLLER = DASH / "app" / "Http" / "Controllers" / "ApiController.php"
 QUEUE_STATS = DASH / "app" / "Services" / "QueueStats.php"
-BATCH = VIEWS / "dashboard" / "batch_automation.blade.php"
 INDEX = VIEWS / "dashboard" / "index.blade.php"
+BATCH = INDEX                                          # «اليوم»: the old Run page is the run panel of the Home view
 LAYOUT = VIEWS / "layouts" / "laqta.blade.php"
 LAYOUT_JS = DASH / "public" / "js" / "layout.js"       # the layout's script (sidebar card, review badge)
 JS = DASH / "public" / "js"
-RUN_JS = [JS / "run-common.js", JS / "run.js"]         # the Run page (batch_automation.blade.php)
-HOME_JS = [JS / "run-common.js", JS / "home.js"]       # the Home page (index.blade.php)
+RUN_JS = [JS / "run-common.js", JS / "run.js"]         # «اليوم»'s run panel (the page's /api/run/live poller)
+HOME_JS = [JS / "run-common.js", JS / "home.js"]       # «اليوم»'s greeting, next step, banner, KPIs and funnel
 PHP = shutil.which("php")
 NODE = shutil.which("node")
 
@@ -458,11 +458,12 @@ const ctl = LaqtaRunPage.createController(deps);
 
 def test_old_review_tab_link_opens_the_bulk_review():
     """The home page used to link to /batch-automation?tab=review; the review grid now lives at /catalog?mode=bulk,
-    and the old link redirects there. The home page links to the review list directly."""
+    and the old link redirects there (before the move of the rest to «اليوم»). The home page links to the review list."""
     run = read(DASH / "app" / "Http" / "Controllers" / "RunController.php")
     page = method(run, "page")
     assert "$request->query('tab') === 'review'" in page and "redirect('/catalog?mode=bulk')" in page
-    assert page.index("redirect('/catalog?mode=bulk')") < page.index("self::snapshot()")
+    assert page.index("redirect('/catalog?mode=bulk')") < page.index("getQueryString()")
+    assert "view(" not in page                                  # the Run page renders nothing any more
     assert "?tab=review" not in read(INDEX)
 
 
@@ -484,19 +485,18 @@ lives = {json.dumps(lives, ensure_ascii=False)};
 const ctl = LaqtaHomePage.createController(deps);
 (async () => {{
     await ctl.poll();
-    const s = last(views.live).lastRun;
-    const starting = {{ percent: s.percentText, counts: s.countsText, text: s.phaseText }};
     await ctl.poll();
-    const r = last(views.live).lastRun;
-    const running = {{ percent: r.percentText, counts: r.countsText }};
     await ctl.poll(); await tick(); await tick();
-    console.log(JSON.stringify({{ starting, running, banner: last(views.banner), waiting: last(views.live).waiting,
+    console.log(JSON.stringify({{ phases: views.live.map(v => v.phase), drawn: Object.keys(last(views.live)).sort(),
+        banner: last(views.banner), waiting: last(views.live).waiting,
         overviews: fetchLog.filter(f => f.url.startsWith('/api/overview')).map(f => f.url) }}));
 }})();
 """
     out = _node(script)
-    assert out["starting"] == {"percent": "—", "counts": "", "text": "text:starting"}
-    assert out["running"]["percent"] == "25%" and out["running"]["counts"].startswith("5 من 20 في هذا التشغيل")
+    # one view per poll, and one more when the end-of-run overview read lands (the live count re-applied)
+    assert [p for i, p in enumerate(out["phases"]) if i == 0 or out["phases"][i - 1] != p] == ["starting", "running", "review"]
+    # the run's progress is the run panel's (run.js «التشغيل الحالي»), drawn once: home.js keeps no second copy
+    assert out["drawn"] == ["banner", "phase", "waiting"]
     assert out["banner"]["visible"] is True and "Gemini لا يستجيب" in out["banner"]["text"]
     assert out["waiting"] == 3                                  # the sidebar badge's ready_for_review
     assert out["overviews"] == ["/api/overview?refresh=1"]      # the run ended: read again past the caches
@@ -521,7 +521,7 @@ def test_confirm_texts_say_exactly_what_happens():
     reset = reset[:reset.index(";\n")]
     assert "ما في ولا منتج جاهز للمراجعة أو معتمد أو فاشل بينمسح، ولا أي اقتراح أو قرار مراجعة" in reset
     assert "إصلاح تشغيل عالق" in batch and "تصفير وإعادة تعيين الحالة" not in batch + run_js
-    # the page says the same next to the button, and the stop button exists only on the Run page
+    # the page says the same next to the button, and only the run panel's script (run.js) stops a run
     assert "الإيقاف ما بيحذف شي" in batch
     assert "/api/stop-batch" not in index + read(JS / "home.js")
 

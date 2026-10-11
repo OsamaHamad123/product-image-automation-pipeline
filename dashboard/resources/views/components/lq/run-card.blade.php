@@ -5,7 +5,7 @@
     <x-lq.run-card live />
     <x-lq.run-card state="running" text="الصفوف 62–101" count="24 / 40" :progress="60" />
     state: loading | idle | running | paused | error | unknown
-    :link="false" leaves out the link to the Run page (a reviewer can't open it: ReviewerLimits)
+    :link="false" leaves out the link to the run panel on «اليوم» (a reviewer has none)
 --}}
 @props([
     'live' => false,
@@ -32,7 +32,7 @@
     $lqText = $text !== null && $text !== '' ? $text : $lqCopy['text'];
     $lqCount = $count !== null && $count !== '' ? (string) $count : null;
     $lqPct = is_numeric($progress) ? max(0, min(100, round((float) $progress))) : null;
-    $lqHref = $href ?? route('dashboard.batch_automation');
+    $lqHref = $href ?? route('dashboard.index') . '#run-current';     // «اليوم»: the «التشغيل الحالي» card
 @endphp
 <section {{ $attributes->class(['lq-runcard']) }} data-state="{{ $lqState }}" aria-label="التشغيل الحالي" @if ($live) data-lq-runcard @endif>
     <div class="lq-runcard__head">
