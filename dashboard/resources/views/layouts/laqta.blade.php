@@ -19,6 +19,8 @@
     The sidebar run card and the review badge poll GET /api/batch-status every 5 s (15 s on «اليوم», which polls
     /api/run/live itself; none while the tab is hidden). Pages can reuse that one poll instead of starting their
     own: window.Laqta.onRunStatus(fn) or the `lq:run-status` document event.
+    «التنبيهات» (js/notices.js): the bell next to «روح لـ…» (and in «حسابي» on the phone) opens a panel with the last
+    30 events, kept in this browser; it listens to that same poll and asks /api/system/attention at most every 5 min.
     Theme: <html data-theme="light|dark"> (none = follow the system), set before the first paint by js/theme-boot.js
     from localStorage «laqta.theme»; the «فاتح / غامق / تلقائي» switch (sidebar foot, and «حسابي» on the phone) calls
     window.Laqta.setTheme. laqta.css swaps only the colour tokens.
@@ -69,7 +71,7 @@
     @yield('styles')
     @stack('styles')
 </head>
-<body class="lq-body @yield('body_class')" data-lq-role="{{ $lqReviewer ? 'reviewer' : 'admin' }}" data-lq-status-url="{{ url('/api/batch-status') }}" data-lq-review-url="{{ route('dashboard.catalog') }}" data-lq-tz="{{ \App\Http\Controllers\ReviewController::displayTimezone() }}">
+<body class="lq-body @yield('body_class')" data-lq-role="{{ $lqReviewer ? 'reviewer' : 'admin' }}" data-lq-status-url="{{ url('/api/batch-status') }}" data-lq-review-url="{{ route('dashboard.catalog') }}" data-lq-home-url="{{ route('dashboard.index') }}" data-lq-attention-url="{{ url('/api/system/attention') }}" data-lq-tz="{{ \App\Http\Controllers\ReviewController::displayTimezone() }}">
     <a class="lq-skip-link" href="#lq-main">تخطَّ إلى المحتوى</a>
 
     <div class="lq-shell">
@@ -88,6 +90,12 @@
                     <x-lq.icon name="search" :size="16" />
                     <span class="lq-goto-open__label">روح لـ…</span>
                     <kbd dir="ltr">Ctrl K</kbd>
+                </button>
+                {{-- «التنبيهات» (notices.js): لوحة صغيرة فيها آخر شي صار، مش صفحة؛ الرقم = الجديد من آخر مرة انفتحت --}}
+                <button type="button" class="lq-notices-open" data-lq-notices-open aria-haspopup="dialog" aria-expanded="false" aria-controls="lq-notices">
+                    <x-lq.icon name="bell" :size="16" />
+                    <span class="lq-notices-open__label">التنبيهات</span>
+                    <span class="lq-notices-open__badge" data-lq-notices-count hidden></span>
                 </button>
 
                 <nav class="lq-nav" aria-label="التنقل الرئيسي">
@@ -137,10 +145,31 @@
                 <span class="lq-account-sheet__name" dir="ltr">{{ auth()->user()->name }}</span>
                 <span class="lq-account-sheet__role">{{ $lqReviewer ? 'مراجع' : 'مدير' }}</span>
                 <button class="lq-btn lq-btn--secondary lq-account-sheet__goto" type="button" data-lq-goto-open>روح لـ… (صفحة، إعداد، أو منتج)</button>
+                <button class="lq-btn lq-btn--secondary lq-account-sheet__notices" type="button" data-lq-notices-open aria-haspopup="dialog" aria-expanded="false" aria-controls="lq-notices">
+                    التنبيهات <span class="lq-notices-open__badge" data-lq-notices-count hidden></span>
+                </button>
                 <x-lq.segmented label="المظهر" :options="$lqThemes" value="system" size="sm" class="lq-theme-switch" data-lq-theme-switch />
                 <button class="lq-btn lq-btn--secondary lq-account-sheet__logout" type="submit" form="lqLogoutForm">خروج</button>
             </div>
         @endauth
+
+        {{-- «التنبيهات» (notices.js): آخر 30 شي صار (تشغيل بلّش أو خلص أو وقف، منتجات وصلت للمراجعة، اعتماد ما زبط،
+             و«شو بدو منك»)، محفوظين بهالمتصفح. aria-modal: Tab بيضل جوّاها وEsc بيرجّع التركيز لزر التنبيهات --}}
+        <div class="lq-notices" id="lq-notices" role="dialog" aria-modal="true" aria-labelledby="lqNoticesTitle" data-lq-notices hidden>
+            <div class="lq-notices__head">
+                <h2 class="lq-notices__title" id="lqNoticesTitle">التنبيهات</h2>
+                <button class="lq-btn lq-btn--ghost lq-btn--sm lq-btn--icon" type="button" data-lq-notices-close aria-label="سكّر">
+                    <x-lq.icon name="x" :size="16" />
+                </button>
+            </div>
+            <ol class="lq-notices__list" data-lq-notices-list></ol>
+            <p class="lq-notices__empty" data-lq-notices-empty>ما في تنبيهات هلق. لما يبلّش أو يخلص تشغيل، أو يوصل شي للمراجعة، بيبيّن هون.</p>
+            <div class="lq-notices__foot">
+                <button class="lq-btn lq-btn--secondary lq-btn--sm" type="button" data-lq-notices-read hidden>علّم الكل مقروء</button>
+                <button class="lq-btn lq-btn--ghost lq-btn--sm" type="button" data-lq-notices-clear hidden>امسح</button>
+                <span class="lq-notices__note">محفوظة على هالمتصفح بس</span>
+            </div>
+        </div>
 
         <main id="lq-main" class="lq-main @yield('lq_main_class')" tabindex="-1">
             @yield('content')
@@ -151,6 +180,7 @@
 
     <script type="application/json" id="lqGotoIndex">@json(\App\Services\GotoIndex::entries($lqReviewer))</script>
     <script src="{{ asset('js/layout.js') }}?v={{ @filemtime(public_path('js/layout.js')) ?: '1' }}"></script>
+    <script src="{{ asset('js/notices.js') }}?v={{ @filemtime(public_path('js/notices.js')) ?: '1' }}"></script>
     <script src="{{ asset('js/jump.js') }}?v={{ @filemtime(public_path('js/jump.js')) ?: '1' }}"></script>
     @yield('scripts')
     @stack('scripts')
