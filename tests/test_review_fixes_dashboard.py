@@ -265,7 +265,7 @@ def test_catalog_reject_with_research_leaves_saving_the_fresh_candidates_to_the_
     submit = submit[: submit.index("function skip()")]
     assert "persistResearchCandidates" not in single
     assert "save-candidates" not in single and "saveCandidates" not in single
-    assert "requeueForReview(item, data, candidate.url)" in submit and "savedCount(data)" in submit
+    assert "requeueForReview(item, data, url)" in submit and "savedCount(data)" in submit
 
 
 @pytest.mark.skipif(PHP is None, reason="php is not installed")
