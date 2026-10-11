@@ -439,7 +439,7 @@
         var close = document.createElement('button');
         close.type = 'button';
         close.className = 'lq-toast__close';
-        close.setAttribute('aria-label', 'إغلاق');
+        close.setAttribute('aria-label', 'سكّر');
         close.appendChild(svgIcon('M6 6l12 12M18 6 6 18', 16));
         el.appendChild(icon);
         el.appendChild(text);
@@ -472,6 +472,63 @@
             close: dismiss,
             update: function (newMessage) { text.textContent = String(newMessage); }
         };
+    }
+
+    // ورا أي نافذة aria-modal مفتوحة (سؤال، «روح لـ…»، «التنبيهات»، «حسابي»، التكبير، نافذة الرفض) الصفحة inert: قارئ
+    // الشاشة ما بيوصلها وTab ما بيفوتها. كل أخ للنافذة (ولأهلها لفوق لحد body) بياخد inert، إلا السكربتات ومنطقة
+    // الإشعارات (role=status، و«تراجع» فيها). منعلّم اللي حطّيناه (data-lq-inert) فما منشيل inert حطّه حدا تاني.
+    // بتنعاد لحالها مع كل تغيير بالصفحة (MutationObserver)، والنوافذ بتستدعيها كمان قبل ما ترجّع التركيز (عنصر inert ما
+    // بياخد تركيز). نافذة مسكّرة (جوّا [hidden]) ما بتنحسب، متل jump.js openModal
+    var INERT_MARK = 'data-lq-inert';
+    var INERT_SKIP = { SCRIPT: 1, STYLE: 1, LINK: 1, TEMPLATE: 1, NOSCRIPT: 1 };
+    function openModals() {
+        var out = [];
+        var found = document.querySelectorAll('[aria-modal="true"]');
+        for (var i = 0; i < found.length; i++) {
+            var m = found[i];
+            if (m.isConnected === false || m.hidden || (m.closest && m.closest('[hidden]'))) continue;
+            out.push(m);
+        }
+        return out;
+    }
+    function syncModals() {
+        var body = document.body;
+        if (!body || typeof document.querySelectorAll !== 'function') return;
+        try {
+            var modals = openModals();
+            var keep = [];
+            var want = [];
+            modals.forEach(function (m) {
+                for (var n = m; n && n !== body && n.parentNode; n = n.parentNode) keep.push(n);
+            });
+            keep.forEach(function (n) {
+                var kids = n.parentNode.children || [];
+                for (var i = 0; i < kids.length; i++) {
+                    var k = kids[i];
+                    if (keep.indexOf(k) >= 0 || want.indexOf(k) >= 0 || INERT_SKIP[String(k.tagName || '').toUpperCase()]) continue;
+                    if (k.hasAttribute && k.hasAttribute('data-lq-toasts')) continue;
+                    want.push(k);
+                }
+            });
+            var marked = document.querySelectorAll('[' + INERT_MARK + ']');
+            for (var j = 0; j < marked.length; j++) {
+                if (want.indexOf(marked[j]) >= 0) continue;
+                marked[j].removeAttribute('inert');
+                marked[j].removeAttribute(INERT_MARK);
+            }
+            want.forEach(function (k) {
+                if (k.hasAttribute('inert')) return;
+                k.setAttribute('inert', '');
+                k.setAttribute(INERT_MARK, '');
+            });
+        } catch (e) { /* an old browser or a partial DOM: the dialogs still trap Tab themselves */ }
+    }
+    if (typeof window.MutationObserver === 'function' && document.body) {
+        try {
+            new window.MutationObserver(syncModals).observe(document.body, {
+                childList: true, subtree: true, attributes: true, attributeFilter: ['hidden', 'aria-modal']
+            });
+        } catch (e) { /* no observer: the dialogs call syncModals themselves */ }
     }
 
     // Questions in the page instead of window.confirm: Laqta.ask(text | {title, text, confirmText, cancelText,
@@ -550,6 +607,7 @@
                 activeAsk = null;
                 document.removeEventListener('keydown', onKey, true);
                 if (back.parentNode) back.parentNode.removeChild(back);
+                syncModals();
                 if (opener && typeof opener.focus === 'function' && document.contains(opener)) opener.focus();
                 resolve(!!ok);
             };
@@ -559,6 +617,7 @@
             activeAsk = dlg;
             document.addEventListener('keydown', onKey, true);
             document.body.appendChild(back);
+            syncModals();
             yes.focus();
         });
     }
@@ -633,6 +692,7 @@
         },
         toast: toast,
         ask: ask,
+        syncModals: syncModals,
         runNotice: runNotice,
         // «روح لـ…» (jump.js) من قائمة «حسابي»: القائمة بتتسكّر قبل ما تنفتح النافذة، والتركيز اللي كان جوّاها
         // بيرجع لزر «حسابي» (هيك لما تتسكّر «روح لـ…» بـ Esc بيرجع لمكان ظاهر)
@@ -704,6 +764,7 @@
     function setAccountOpen(open, refocus) {
         accountToggle.setAttribute('aria-expanded', open ? 'true' : 'false');
         setHidden(accountSheet, !open);
+        syncModals();
         if (open) {
             var logout = $('button', accountSheet);
             if (logout) logout.focus();

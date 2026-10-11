@@ -11,6 +11,27 @@ causes: the quality gate threw away white-background packshots, an unverified "l
 success, siblings of the right product outranked it, and reviewers' rejections were never remembered. The search
 core was rebuilt and wired into the queue, the dashboard actions and the sheet writes. Every claim below has a test.
 
+### UI redesign, phase 6: touch screens and screen readers
+
+- **Touch, measured on 6 viewports from 320px to a tablet.**
+  - Fields are 16px on touch, so iOS no longer zooms on focus.
+  - Check, switch and «تذكرني» rows and small links are 44px tall on touch.
+  - The bulk brand picker matches the chips next to it.
+  - On a phone held sideways, the decision bar and the tab bar take 109px, down from 133px.
+  - The desktop look is unchanged.
+- **Screen readers and the keyboard.** axe serious issues went from 32 to 0.
+  - While any dialog is open, the page behind it is `inert` (`Laqta.syncModals`). Review keys wait for shell dialogs too:
+    S no longer skipped the product behind an open «التنبيهات».
+  - Names:
+    - The picked image's alt is the product name.
+    - Bulk cards and their buttons say the product.
+    - Setup steps, cutout cards and the lightbox are named.
+  - A new notice and run progress (once per quarter) are announced. «جديد» is a word, not only a colour.
+  - Contrast:
+    - «خروج» on the dark sidebar: 3.0 → 12.9:1.
+    - The palette's key hints: 3.5 → 5.2:1.
+    - Enter on «اعتماد»: 3.7 → 7.3:1.
+
 ### UI redesign, phase 5: notices, faster review, one design system everywhere
 
 - **«التنبيهات»: a bell in the sidebar and in «حسابي», with a panel (not a page) of the last 30 events.**

@@ -126,7 +126,8 @@
 
     function shots(url, alt) {
         const el = R.el;
-        return el('div', { className: 'cq-stages' }, THEMES.map(([mode, label]) => {
+        // على الموبايل الصور التلاتة بتمرق لجنب (overflow): markScrollers بيخلّيها توصلها لوحة المفاتيح بس وقتها
+        return el('div', { className: 'cq-stages', role: 'group', 'aria-label': alt }, THEMES.map(([mode, label]) => {
             const stage = el('div', { className: 'cq-stage' }, [R.img(url, alt)]);
             if (R.themePreview) R.themePreview.apply(stage, mode);
             return el('figure', { className: 'cq-shot' }, [stage, el('figcaption', { className: 'cq-shot__label', text: label })]);
@@ -270,7 +271,7 @@
         }
 
         function buildCard(item) {
-            const card = el('article', { className: 'cq-card', dataset: { id: item.id } });
+            const card = el('article', { className: 'cq-card', dataset: { id: item.id }, 'aria-label': item.product_name || 'منتج بلا اسم' });
             fillCard(card, item);
             return card;
         }
@@ -300,6 +301,7 @@
 
         function refreshCard(card, item, message) {
             fillCard(card, item, message);
+            markScrollers();
         }
 
         async function tryCut(item, method, card) {
@@ -400,12 +402,31 @@
             });
         }
 
+        // صف صور بيمرق لجنب (الموبايل) لازم ياخد تركيز ليتمرّق بالأسهم (axe scrollable-region-focusable)؛ اللي ما بيمرق
+        // ما بيزيد وقفة Tab
+        function markScrollers() {
+            if (!grid.querySelectorAll) return;
+            grid.querySelectorAll('.cq-stages').forEach(row => {
+                const scrolls = row.scrollWidth > row.clientWidth + 1;
+                if (scrolls) row.setAttribute('tabindex', '0');
+                else row.removeAttribute('tabindex');
+            });
+        }
+        let resizeTimer = null;
+        if (root.addEventListener) {
+            root.addEventListener('resize', () => {
+                clearTimeout(resizeTimer);
+                resizeTimer = setTimeout(markScrollers, 200);
+            });
+        }
+
         function render() {
             renderFilters();
             renderStatus();
             renderGrid();
             renderPager();
             renderLog();
+            markScrollers();
         }
 
         // بعد unmount: جواب طلب لسا بالطريق ما بيرسم شي (S.dead)

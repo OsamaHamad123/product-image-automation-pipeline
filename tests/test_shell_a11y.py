@@ -276,7 +276,8 @@ console.log(JSON.stringify({ kids, groups, first, moved, expanded: input.getAttr
     emptyHidden: find('lq-goto__empty').hidden, modal: box().children[0].getAttribute('aria-modal'),
     presentation: list.all().filter(n => n.getAttribute && n.getAttribute('role') === 'presentation').length }));
 """)
-    assert out["kids"] == [["LI", "group", "صفحات"], ["LI", "group", "الإعدادات"]]
+    # divs, not li: role="group" is not allowed on an <li> (axe aria-allowed-role); the listbox holds groups of options
+    assert out["kids"] == [["DIV", "group", "صفحات"], ["DIV", "group", "الإعدادات"]]
     assert out["groups"][0] == {"head": ["true", "صفحات"], "wrap": "none", "options": ["option", "option"]}
     assert out["groups"][1]["options"] == ["option"]
     assert out["presentation"] == 0                          # no header item inside the listbox

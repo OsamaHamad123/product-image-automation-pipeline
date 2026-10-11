@@ -536,6 +536,9 @@
                 tab.setAttribute('data-status', step.status);
                 var st = tab.querySelector('[data-setup-tab-state]');
                 if (st) st.textContent = step.label;
+                // اسم الرابط (على الموبايل العنوان والحالة مخفيين، والرقم بس ظاهر): «الخطوة 2: …، ناقص»
+                var title = tab.querySelector('.lq-setup-steps__title');
+                if (title) tab.setAttribute('aria-label', 'الخطوة ' + (step.n || '') + ': ' + title.textContent + '، ' + step.label);
                 var n = tab.querySelector('.lq-setup-steps__n');
                 if (n) {
                     clear(n);

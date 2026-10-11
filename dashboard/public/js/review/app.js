@@ -1629,7 +1629,7 @@
             box.appendChild(el('div', { className: 'rv-jobs__head' }, [
                 el('span', { className: 'rv-jobs__ok' }, [icon('check', 18, 2.2)]),
                 el('span', { className: 'rv-jobs__text', text: 'جاهزة. بتقدر تكمل شغلك.' }),
-                el('button', { type: 'button', className: 'rv-jobs__close', 'aria-label': 'إغلاق', onclick: () => S.jobs.dismiss() }, [icon('x', 16, 2)])
+                el('button', { type: 'button', className: 'rv-jobs__close', 'aria-label': 'سكّر', onclick: () => S.jobs.dismiss() }, [icon('x', 16, 2)])
             ]));
             jobsHideTimer = setTimeout(() => {
                 if (!S.jobs.sending() && !S.jobs.state().failedAll) S.jobs.dismiss();
@@ -1658,7 +1658,7 @@
                     ? el('a', { className: 'lq-btn lq-btn--secondary lq-btn--sm rv-jobs__check', href: S.urls.publishCheck,
                                 title: 'بيجرّب الاعتماد كامل على صورة تجريبية وبيقلك وين وقف وشو تعمل', text: 'افحص النشر' })
                     : null,
-                el('button', { type: 'button', className: 'rv-jobs__close', 'aria-label': 'إغلاق', onclick: () => S.jobs.dismiss() }, [icon('x', 16, 2)])
+                el('button', { type: 'button', className: 'rv-jobs__close', 'aria-label': 'سكّر', onclick: () => S.jobs.dismiss() }, [icon('x', 16, 2)])
             ]));
         }
         const failed = st.jobs.filter(j => j.state === 'failed');
@@ -1989,6 +1989,7 @@
                 activeDialog = null;
                 clear(d.dialog);
                 d.dialog.hidden = true;
+                R.syncModals();
                 restoreFocus(opener);
                 resolve(!!ok);
             };
@@ -2130,9 +2131,10 @@
                                                    } }) : null;
         lb.close = el('button', { type: 'button', className: 'rv-lb__close', id: 'rvLbClose', 'aria-label': 'سكّر (Esc)',
                                   onclick: () => closeLightbox() }, [icon('x', 22, 2)]);
-        lb.box = el('div', { className: 'rv-lb', id: 'rvLightbox', role: 'dialog', 'aria-modal': 'true', 'aria-label': opts.title || 'تكبير الصورة' }, [
+        // اسم النافذة عنوانها الظاهر (اسم المنتج، أو «تكبير الصورة» بوضع الجملة)
+        lb.box = el('div', { className: 'rv-lb', id: 'rvLightbox', role: 'dialog', 'aria-modal': 'true', 'aria-labelledby': 'rvLbTitle' }, [
             el('div', { className: 'rv-lb__bar' }, [
-                el('strong', { className: 'rv-lb__title' }, [bdi(opts.title || '', null, 'auto')]), lb.count,
+                el('strong', { className: 'rv-lb__title', id: 'rvLbTitle' }, [bdi(opts.title || 'تكبير الصورة', null, 'auto')]), lb.count,
                 el('span', { className: 'rv-lb__hint rv-keyhint', text: 'دولاب الماوس أو قرصة للتكبير · ← → للتنقل' }),
                 lb.choose, lb.close
             ]),
@@ -2265,6 +2267,7 @@
         lightbox = null;
         if (lb.box.parentNode) lb.box.parentNode.removeChild(lb.box);
         if (document.body && document.body.classList) document.body.classList.remove('rv-lb-open');
+        R.syncModals();
         if (!silent) restoreFocus(lb.opener);
         return true;
     }
@@ -2336,6 +2339,8 @@
             if (!e.ctrlKey && !e.metaKey && !e.altKey) R.bulk.dialogKey(e, key);
             return;
         }
+        // «التنبيهات» أو «حسابي» أو «روح لـ…» أو سؤال الشريط الجانبي فوق الشاشة: مفاتيحها إلها (S ما بتتخطى من وراها)
+        if (R.outsideModalOpen(S.dom.root)) return;
         const active = document.activeElement;
         const tag = active && active.tagName ? String(active.tagName).toLowerCase() : '';
         const inputType = tag === 'input' ? String(active.type || active.getAttribute('type') || 'text').toLowerCase() : '';

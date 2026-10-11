@@ -3178,6 +3178,29 @@ body.rv-lb-open {
         width: 44px;
         height: 44px;
     }
+
+    /* the brand picker: as tall as the chips beside it, and the whole box opens the list (the select was a 20px line
+       inside it); 16px text so iOS does not zoom on focus */
+    .rv-brand {
+        height: var(--lq-btn-h);
+    }
+
+    .lq-body .rv-brand__select {
+        align-self: stretch;
+        font-size: var(--lq-fs-lg);
+    }
+
+    .lq-body .rv-pick__source {
+        min-height: 44px;
+    }
+}
+
+/* A phone on its side (about 390px tall): the tab bar and the decision bar together took a third of the screen.
+   The tab bar puts its icon beside the label (48px) and the decision bar loses some padding; the buttons stay 44px */
+@media (max-width: 980px) and (orientation: landscape) and (max-height: 500px) {
+    .rv-actionbar {
+        padding-block: 6px;
+    }
 }
 
 /* the search box above the bulk cards */
