@@ -37,7 +37,8 @@
     <input type="hidden" name="section" value="sources">
     <div class="lq-settings-card__head">
         <h2 class="lq-section-title" id="lq-settings-sources-title">مصادر البحث الإضافية</h2>
-        <p class="lq-settings-card__intro">إذا ما لقى البحث العادي صورة أكيدة للمنتج، النظام بيعمل جولة تانية: صفحات المتاجر الإماراتية وموقع الماركة، Google Shopping، والبحث بالصورة (بيلاقي نفس الصورة بدقة أعلى). كل اللي بيلاقيه بيمر بنفس الفحص، وصور الصفحات ما بتنشر تلقائياً أبداً: بتستنى مراجعتك.</p>
+        <p class="lq-settings-card__intro">إذا ما لقى البحث العادي صورة أكيدة، النظام بيعمل جولة تانية، وصور الصفحات ما بتنشر تلقائياً أبداً: بتستنى مراجعتك.</p>
+        <details><summary class="lq-link">تفاصيل</summary><p class="lq-field__hint">الجولة التانية بتدوّر بصفحات المتاجر الإماراتية وموقع الماركة، Google Shopping، والبحث بالصورة (بيلاقي نفس الصورة بدقة أعلى). كل اللي بيلاقيه بيمر بنفس الفحص.</p></details>
     </div>
 
     <div class="lq-settings-switch-row">
@@ -56,7 +57,8 @@
         <legend class="lq-field__label">الفهرس المحلي (مجاني)</legend>
         <div class="lq-settings-switch-row">
             <x-lq.switch name="local_index_enabled" value="true" label="البحث بالفهرس المحلي" show-label :checked="$src['local_index_enabled']" :disabled="(bool) $dbError" />
-            <span class="lq-field__hint">صفحات منتجات المتاجر الإماراتية من خرائط مواقعها (sitemaps). النظام بيدوّر فيها مع أول بحث بجوجل وبدون أي تكلفة، وصورها بتمر بنفس الفحص وما بتنشر تلقائياً أبداً: بتستنى مراجعتك.</span>
+            <span class="lq-field__hint">صفحات المتاجر الإماراتية بلا أي تكلفة، وصورها ما بتنشر تلقائياً أبداً: بتستنى مراجعتك.</span>
+            <details><summary class="lq-link">تفاصيل</summary><p class="lq-field__hint">صفحات منتجات المتاجر الإماراتية من خرائط مواقعها (sitemaps). النظام بيدوّر فيها مع أول بحث بجوجل، وصورها بتمر بنفس الفحص.</p></details>
         </div>
         <label class="lq-field">
             <span class="lq-field__label">صفحات بتنقرا لكل منتج</span>
@@ -106,7 +108,7 @@
         <legend class="lq-field__label">الباركود</legend>
         <label class="lq-check lq-settings-choice">
             <input type="radio" name="gtin_policy" value="evidence" @checked($src['gtin_policy'] === 'evidence') {{ $fieldAttrs('gtin_policy') }}>
-            <span>دليل مساعد (موصى به): بيقوّي الصورة بس إذا الماركة متطابقة؛ وإذا اختلف، الصورة بتحتاج تطابق كامل بالماركة والاسم والحجم، وبتوصلك للمراجعة مع تنبيه إن الباركود مختلف. مناسب لأن باركود الشيت ممكن يكون غلط.</span>
+            <span>دليل مساعد (موصى به): بيقوّي الصورة لما يتطابق، وإذا اختلف الصورة بتوصلك للمراجعة مع تنبيه.</span>
         </label>
         <label class="lq-check lq-settings-choice">
             <input type="radio" name="gtin_policy" value="strict" @checked($src['gtin_policy'] === 'strict') {{ $fieldAttrs('gtin_policy') }}>
@@ -116,6 +118,7 @@
             <input type="radio" name="gtin_policy" value="off" @checked($src['gtin_policy'] === 'off') {{ $fieldAttrs('gtin_policy') }}>
             <span>تجاهل الباركود: الماركة والاسم والحجم بس.</span>
         </label>
+        <details><summary class="lq-link">تفاصيل</summary><p class="lq-field__hint">«دليل مساعد» بيقوّي الصورة بس إذا الماركة متطابقة؛ وإذا اختلف الباركود، الصورة بتحتاج تطابق كامل بالماركة والاسم والحجم، وبتوصلك للمراجعة مع تنبيه إن الباركود مختلف. مناسب لأن باركود الشيت ممكن يكون غلط.</p></details>
         {{ $fieldError('gtin_policy') }}
     </fieldset>
 

@@ -24,7 +24,7 @@ class SettingsController extends Controller
 {
     public const TABS = [
         'sheet' => ['label' => 'ربط الشيت', 'hint' => 'الجدول والتبويب والأعمدة'],
-        'keys' => ['label' => 'المفاتيح', 'hint' => 'Serper · Gemini · Claude · PhotoRoom · Cloudinary'],
+        'keys' => ['label' => 'المفاتيح', 'hint' => 'البحث، قراءة الملصق، عزل الخلفية والرفع'],
         'models' => ['label' => 'نماذج التحقق', 'hint' => 'مين بيقرأ الملصق وبكم'],
         'auto-publish' => ['label' => 'النشر الآلي', 'hint' => 'الماركات الجاهزة'],
         'processing' => ['label' => 'معالجة الصور', 'hint' => 'المقاس وعزل الخلفية'],

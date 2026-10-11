@@ -27,8 +27,8 @@
         @foreach ($keys as $row)
             <li class="lq-keys__row" id="lq-key-{{ $row['id'] }}" data-key-row="{{ $row['id'] }}">
                 <span class="lq-keys__name">
-                    <span class="lq-keys__title">{{ $row['name'] }}</span>
-                    <span class="lq-keys__use">{{ $row['use'] }}</span>
+                    <span class="lq-keys__title">{{ $row['use'] !== '' ? $row['use'] : $row['name'] }}</span>
+                    @if ($row['use'] !== '')<span class="lq-keys__use" dir="ltr">{{ $row['name'] }}</span>@endif
                 </span>
                 <span class="lq-keys__state lq-keys__state--{{ $row['tone'] }}">
                     <span class="lq-dot {{ $keyDots[$row['tone']] ?? 'lq-dot--muted' }}" aria-hidden="true"></span>

@@ -361,7 +361,7 @@ def test_keys_step_by_saved_state_last_check_and_background_method():
     assert failing_step["status"] == "fail" and serper["tone"] == "danger" and "رصيد" in serper["fix"]
     assert _step(out["untested"], "keys")["status"] == "todo" and "افحص المفاتيح" in _step(out["untested"], "keys")["rows"][1]["fix"]
     bg = {r["key"]: r for r in _step(out["removebg_missing"], "keys")["rows"]}["bg"]
-    assert bg["label"].startswith("remove.bg") and "REMOVE_BG_API_KEY" in bg["fix"] and bg["href"] == "/settings?tab=processing"
+    assert bg["label"] == "عزل الخلفية · remove.bg" and "REMOVE_BG_API_KEY" in bg["fix"] and bg["href"] == "/settings?tab=processing"
     assert _step(out["removebg_missing"], "keys")["status"] == "todo"
     assert _step(out["removebg"], "keys")["status"] == "ok" and _step(out["local"], "keys")["status"] == "ok"
     assert {r["key"]: r for r in _step(out["local"], "keys")["rows"]}["bg"]["state"] == "محلي على هالجهاز: ما بدو مفتاح"

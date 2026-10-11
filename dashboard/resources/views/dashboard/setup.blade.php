@@ -27,16 +27,11 @@
 
 @section('content')
 <div class="lq-setup" data-setup-page data-active="{{ $active }}">
-    <header class="lq-page-header">
-        <div class="lq-page-header__text">
-            <span class="lq-page-header__eyebrow">التجهيز لأول مرة</span>
-            <h1 class="lq-page-title">جهّز لقطة</h1>
-            <p class="lq-page-header__desc">{{ $setupTotal }} خطوات قصيرة لتتأكد إنو كلشي جاهز قبل ما تشغّل الشيت كله. التقدّم بينحفظ: فيك تطلع وترجع تكمّل من وين ما وقفت.</p>
-        </div>
-        <div class="lq-page-header__actions">
+    <x-lq.page-header eyebrow="التجهيز لأول مرة" title="جهّز لقطة" :description="$setupTotal . ' خطوات قصيرة لتتأكد إنو كلشي جاهز قبل ما تشغّل الشيت كله. التقدّم محفوظ: فيك تطلع وترجع تكمّل من وين ما وقفت.'">
+        <x-slot:actions>
             <span class="lq-setup__progress" data-setup="progress"><strong class="lq-num" data-setup="progress-ok">{{ $setup['progress']['ok'] }}</strong> من {{ $setupTotal }} خطوات تمام</span>
-        </div>
-    </header>
+        </x-slot:actions>
+    </x-lq.page-header>
 
     @unless ($setup['db'])
         <x-lq.alert variant="danger" title="قاعدة البيانات مش متاحة:">التقدّم ما بينحفظ والفحوصات ما بتمشي هلق. شغّل قاعدة البيانات وحدّث الصفحة.</x-lq.alert>
@@ -119,7 +114,8 @@
                             <x-lq.button variant="primary" icon="refresh" data-setup="keys-test" :disabled="!$setup['db']"><span data-setup="keys-test-label">افحص المفاتيح</span></x-lq.button>
                             <x-lq.button variant="secondary" icon="settings" :href="route('dashboard.settings') . '?tab=keys'">حطّ المفاتيح بالإعدادات</x-lq.button>
                         </div>
-                        <p class="lq-setup-note">{{ $keysNote }} قيمة المفتاح ما بتنعرض هون أبداً: بنقول بس إذا محفوظ وإذا اشتغل.</p>
+                        <p class="lq-setup-note">{{ $keysNote }}</p>
+                        <details><summary class="lq-link">تفاصيل</summary><p class="lq-setup-note">قيمة المفتاح ما بتنعرض هون أبداً: بنقول بس إذا محفوظ وإذا اشتغل. الفحص بيستعمل Serper للبحث وPhotoRoom لعزل الخلفية.</p></details>
                         @break
 
                     @case('brands')
@@ -127,7 +123,8 @@
                             <x-lq.button variant="primary" icon="search" data-setup="brands-check" :disabled="!$setup['db']"><span data-setup="brands-check-label">افحص جدول الماركات</span></x-lq.button>
                             <x-lq.button variant="secondary" icon="store" :href="url($step['href'])">عبّي جدول الماركات</x-lq.button>
                         </div>
-                        <p class="lq-setup-note">الفحص بيقرأ التبويب بس: ما بيكتب بالشيت وما بيكلّف شي. «عبّي جدول الماركات» بصفحة التشغيل بيقترح صف لكل ماركة ناقصة، وما بينكتب شي قبل ما تعتمده.</p>
+                        <p class="lq-setup-note">الفحص بيقرأ التبويب بس: ما بيكتب بالشيت وما بيكلّف شي.</p>
+                        <details><summary class="lq-link">تفاصيل</summary><p class="lq-setup-note">«عبّي جدول الماركات» بصفحة التشغيل بيقترح صف لكل ماركة ناقصة، وما بينكتب شي قبل ما تعتمده.</p></details>
                         @break
 
                     @case('publish')
@@ -135,7 +132,8 @@
                             <x-lq.button variant="primary" icon="play" data-setup="publish-run" :disabled="!$setup['db']"><span data-setup="publish-run-label">افحص النشر</span></x-lq.button>
                             <a class="lq-link" href="{{ url($step['details_href']) }}">التفاصيل بصفحة الصحة</a>
                         </div>
-                        <p class="lq-setup-note" data-setup="publish-meta">@if ($step['when'] !== '')آخر فحص للنشر: {{ $step['when'] }}@if ($step['sample'] !== '') · {{ $step['sample'] }}@endif. @endif ممكن يكلّف طلب عزل خلفية واحد وقراءة Gemini وحدة. الصورة التجريبية بتنرفع على Cloudinary وبتنمسح، وبالشيت منكتب عنوان عمود الرابط نفسه فوق حاله. عادةً بيخلص بأقل من دقيقة.</p>
+                        <p class="lq-setup-note" data-setup="publish-meta">@if ($step['when'] !== '')آخر فحص للنشر: {{ $step['when'] }}@if ($step['sample'] !== '') · {{ $step['sample'] }}@endif. @endif ممكن يكلّف طلب عزل خلفية واحد وقراءة ملصق وحدة، وعادةً بيخلص بأقل من دقيقة.</p>
+                        <details><summary class="lq-link">تفاصيل</summary><p class="lq-setup-note">الصورة التجريبية بتنرفع على Cloudinary وبتنمسح، وبالشيت منكتب عنوان عمود الرابط نفسه فوق حاله: ما منلمس منتجاتك. قراءة الملصق بـ Gemini إذا مفتاحها محفوظ.</p></details>
                         @break
 
                     @case('run')
@@ -151,7 +149,7 @@
                             <x-lq.button variant="secondary" icon="search" data-setup="run-plan" :disabled="!$setup['db']"><span data-setup="run-plan-label">جهّز أول تشغيل</span></x-lq.button>
                             <a class="lq-btn lq-btn--primary" href="{{ url($step['review_href']) }}" data-setup="review-link" @if ($step['status'] !== 'ok') hidden @endif><x-lq.icon name="review" :size="18" :stroke="2" />راجع الصور</a>
                         </div>
-                        <p class="lq-setup-note">بيدوّر على صور 5 منتجات بس من الشيت (اللي ما إلها صور). الصور بتستنى مراجعتك وما بتنزل الشيت لحالها قبل ما تعتمدها.</p>
+                        <p class="lq-setup-note">بيدوّر على صور 5 منتجات بس (اللي ما إلها صور)، وما بينزل شي عالشيت قبل ما تعتمده.</p>
                         @break
                 @endswitch
             </div>
@@ -180,7 +178,7 @@
         </div>
     </section>
 
-    <p class="lq-setup__later">بدك تكمّل بعدين؟ التقدّم محفوظ، والرئيسية بتذكّرك لحد ما تخلّص. <a class="lq-link" href="{{ route('dashboard.index') }}">رجوع للرئيسية</a></p>
+    <p class="lq-setup__later">بدك تكمّل بعدين؟ الرئيسية بتذكّرك لحد ما تخلّص. <a class="lq-link" href="{{ route('dashboard.index') }}">رجوع للرئيسية</a></p>
 </div>
 
 <script type="application/json" id="lq-setup-initial">@json($setup)</script>
