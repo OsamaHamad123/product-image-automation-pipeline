@@ -15,6 +15,9 @@
 @php
     $setupDots = ['success' => 'lq-dot--success', 'danger' => 'lq-dot--danger', 'warning' => 'lq-dot--warning', 'info' => 'lq-dot--info', 'muted' => 'lq-dot--muted'];
     $setupTotal = count($setup['steps']);
+    // a check row's state says its tone in the shared text tones (setup.js stateTone: the same rule)
+    $setupText = fn ($tone) => ['success' => 'lq-text--success', 'danger' => 'lq-text--danger',
+        'warning' => 'lq-text--warning'][$tone] ?? 'lq-text--muted';
 @endphp
 
 <div class="lq-setup" data-setup-page data-active="{{ $active }}">
@@ -52,7 +55,7 @@
         <section class="lq-card lq-setup-step" id="setup-{{ $step['key'] }}" data-setup-step="{{ $step['key'] }}" data-status="{{ $step['status'] }}" aria-labelledby="setup-{{ $step['key'] }}-title" @if ($step['key'] !== $active) hidden @endif>
             <div class="lq-setup-step__head">
                 <span class="lq-setup-step__count">الخطوة {{ $step['n'] }} من {{ $setupTotal }}</span>
-                <h2 class="lq-setup-step__title" id="setup-{{ $step['key'] }}-title">{{ $step['title'] }}</h2>
+                <h2 class="lq-section-title lq-setup-step__title" id="setup-{{ $step['key'] }}-title">{{ $step['title'] }}</h2>
                 <p class="lq-setup-step__lead">{{ $step['lead'] }}</p>
             </div>
 
@@ -67,7 +70,7 @@
                     <li class="lq-setup-check" data-row="{{ $row['key'] }}" data-tone="{{ $row['tone'] }}">
                         <span class="lq-dot {{ $setupDots[$row['tone']] ?? 'lq-dot--muted' }}" aria-hidden="true"></span>
                         <span class="lq-setup-check__label">{{ $row['label'] }}</span>
-                        <span class="lq-setup-check__state" dir="auto">{{ $row['state'] }}</span>
+                        <span class="lq-setup-check__state {{ $setupText($row['tone']) }}" dir="auto">{{ $row['state'] }}</span>
                         @if ($row['fix'] !== '' || $row['href'] !== '')
                             <p class="lq-setup-check__fix" dir="auto">{{ $row['fix'] }}@if ($row['href'] !== '') <a class="lq-link" href="{{ url($row['href']) }}">{{ $row['href_label'] }}</a>@endif</p>
                         @endif
@@ -163,7 +166,7 @@
 
     <section class="lq-card lq-setup-ready" data-setup="ready" aria-labelledby="setup-ready-title" @if ($active !== 'ready') hidden @endif>
         <span class="lq-setup-ready__icon" aria-hidden="true"><x-lq.icon name="check" :size="22" :stroke="2.4" /></span>
-        <h2 class="lq-setup-step__title" id="setup-ready-title" data-setup="ready-title">{{ $setup['ready'] ? 'لقطة جاهزة' : 'باقي خطوات' }}</h2>
+        <h2 class="lq-section-title lq-setup-step__title" id="setup-ready-title" data-setup="ready-title">{{ $setup['ready'] ? 'لقطة جاهزة' : 'باقي خطوات' }}</h2>
         <p class="lq-setup-step__lead" data-setup="ready-text">{{ $setup['ready'] ? 'كل الخطوات خلصت. راجع الصور اللي لقيناها، وبعدين شغّل الشيت كله من «اليوم».' : 'في خطوات لسا ما خلصت: فيك ترجعلها، أو تخلّص التجهيز هلق وتكمّلها بعدين من الإعدادات.' }}</p>
         <div class="lq-setup-actions">
             <x-lq.button variant="primary" icon="check" data-setup="finish" :disabled="!$setup['db']">خلّصت التجهيز</x-lq.button>

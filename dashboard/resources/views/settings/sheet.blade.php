@@ -41,13 +41,13 @@
             <x-lq.button variant="secondary" icon="search" data-sheet-preview>معاينة</x-lq.button>
             <x-lq.button variant="primary" icon="check" data-sheet-save>حفظ الربط</x-lq.button>
         </div>
-        <p class="lq-settings-form__status" role="status" aria-live="polite" data-sheet-status></p>
+        <p class="lq-settings-form__status lq-text--muted" role="status" aria-live="polite" data-sheet-status></p>
     </form>
 
     <div class="lq-settings-preview" data-sheet-result hidden>
-        <h3 class="lq-settings-preview__title">الأعمدة</h3>
+        <h3 class="lq-card__title">الأعمدة</h3>
         <ul class="lq-settings-columns" data-sheet-columns></ul>
-        <h3 class="lq-settings-preview__title">أول 5 صفوف</h3>
+        <h3 class="lq-card__title">أول 5 صفوف</h3>
         <div class="lq-table-wrap">
             <table class="lq-table lq-settings-preview__table">
                 <thead><tr data-sheet-head></tr></thead>

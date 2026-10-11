@@ -148,17 +148,7 @@ def test_text_tones_share_one_set_of_values():
     for tone in TEXT_TONES:
         assert f"--lq-text-{tone}:" in root_block(), tone
         assert re.search(rf"\.lq-text--{tone} \{{ color: var\(--lq-text-{tone}\); \}}", css), tone
-    # the per-page status texts take the same tokens (their class names keep working)
-    sets = {
-        "settings": ["lq-settings-form__status--", "lq-settings-columns__item--", "lq-keys__state--"],
-        "health": ["lq-health-provider__problems--"],
-    }
-    for page, prefixes in sets.items():
-        for selector, body in rules(read(PAGE_CSS[page])):
-            if any(p in selector for p in prefixes) and re.search(r"(?<![-\w])color:", body):
-                colours = re.findall(r"(?<![-\w])color:\s*([^;]+);", body)
-                assert colours and all(re.fullmatch(r"var\(--lq-text-(success|warning|danger|info|muted)\)", c)
-                                       for c in colours), (page, selector, colours)
+    # the per-page status texts now carry .lq-text--* themselves: tests/test_design_adoption.py
 
 
 # ---------------------------------------------------------------------------

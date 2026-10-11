@@ -6,7 +6,8 @@
     the stored key. Each provider's form saves its own section only.
 --}}
 @php
-    $keyDots = ['success' => 'lq-dot--success', 'danger' => 'lq-dot--danger', 'warning' => 'lq-dot--warning', 'muted' => 'lq-dot--muted'];
+    // a key's state is a chip of the shared tones (a not-checked or optional key is neutral)
+    $keyChips = ['success' => 'success', 'danger' => 'danger', 'warning' => 'warning', 'muted' => 'neutral'];
     $keyLabels = [
         'serper_api_key' => 'مفتاح Serper الجديد',
         'gemini_api_key' => 'مفتاح Gemini الجديد',
@@ -30,9 +31,8 @@
                     <span class="lq-keys__title">{{ $row['use'] !== '' ? $row['use'] : $row['name'] }}</span>
                     @if ($row['use'] !== '')<span class="lq-keys__use" dir="ltr">{{ $row['name'] }}</span>@endif
                 </span>
-                <span class="lq-keys__state lq-keys__state--{{ $row['tone'] }}">
-                    <span class="lq-dot {{ $keyDots[$row['tone']] ?? 'lq-dot--muted' }}" aria-hidden="true"></span>
-                    {{ $row['state'] }}
+                <span class="lq-keys__state">
+                    <x-lq.chip :tone="$keyChips[$row['tone']] ?? 'neutral'" size="sm">{{ $row['state'] }}</x-lq.chip>
                     @if ($row['from_env'])
                         <span class="lq-keys__source">من ملف ‎.env</span>
                     @endif

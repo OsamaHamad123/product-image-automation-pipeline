@@ -142,9 +142,8 @@ def test_classes_and_tokens_exist():
            # the hints/notes the models controls point at (aria-describedby)
            "lq-models-primary-help", "lq-models-strong-help", "lq-models-normalizer-help", "lq-models-budget-help",
            "lq-models-prices-help"}
-    # classes built at runtime: 'lq-tone--' + tone, 'lq-dot--' + tone, '...--' + tone
-    runtime = {"lq-tone", "lq-dot", "lq-keys__state", "lq-settings-columns__item", "lq-settings-form__status",
-               "lq-health-provider__problems", "lq-alert", "lq-toast", "lq-dot lq-dot", "lq-skeleton"}
+    # classes built at runtime: 'lq-tone--' + tone, 'lq-dot--' + tone, 'lq-text--' + tone, 'lq-chip--' + tone
+    runtime = {"lq-tone", "lq-dot", "lq-text", "lq-chip", "lq-alert", "lq-toast", "lq-dot lq-dot", "lq-skeleton"}
     for path in VIEW_FILES + [HEALTH_JS, SETTINGS_JS]:
         used = {c.rstrip("-") for c in CLASS_RE.findall(read(path))}
         missing = sorted(c for c in used - ids - runtime if c not in defined)

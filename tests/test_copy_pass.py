@@ -162,7 +162,7 @@ def test_health_service_cards_are_titled_by_what_they_do():
     for key, role in (("serper", "البحث عن الصور"), ("gemini", "قارئ الملصق"), ("photoroom", "عزل الخلفية"),
                       ("cloudinary", "رفع الصور")):
         assert f"'{key}' => '{role}'" in roles
-    head = re.search(r'<h2 class="lq-health-service__name">(.*?)</h2>', diag).group(1)
+    head = re.search(r'<h2 class="lq-card__title lq-health-service__name">(.*?)</h2>', diag).group(1)
     assert head.startswith("{{ $serviceRoles[$service['key']]")
     assert '<span class="lq-subtle" dir="ltr">{{ $service[\'name\'] }}</span>' in head
 

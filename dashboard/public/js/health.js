@@ -1238,6 +1238,13 @@
 
     var DOTS = { success: 'lq-dot--success', danger: 'lq-dot--danger', warning: 'lq-dot--warning', info: 'lq-dot--info',
         muted: 'lq-dot--muted' };
+    // a service's state chip (diagnostics.blade.php $healthChips: the same map)
+    var CHIPS = { success: 'success', danger: 'danger', warning: 'warning', info: 'info', muted: 'neutral' };
+    var TEXT_TONES = { success: 1, warning: 1, danger: 1, info: 1, muted: 1 };
+
+    function textTone(tone) {
+        return 'lq-text--' + (TEXT_TONES[tone] ? tone : 'muted');
+    }
 
     function $(hook) {
         return page.querySelector('[data-health="' + hook + '"]');
@@ -1424,7 +1431,10 @@
             var view = views[key];
             card.setAttribute('data-tone', view.tone);
             var state = card.querySelector('[data-service-state]');
-            if (state) state.textContent = view.state;
+            if (state) {
+                state.className = 'lq-chip lq-chip--sm lq-chip--' + (CHIPS[view.tone] || 'neutral') + ' lq-health-service__state';
+                state.textContent = view.state;
+            }
             var dot = card.querySelector('[data-service-dot]');
             if (dot) dot.className = 'lq-dot lq-dot--lg ' + (DOTS[view.tone] || DOTS.muted);
             var details = card.querySelector('[data-service-details]');
@@ -1525,9 +1535,9 @@
             var row = make('div', 'lq-health-provider');
             row.title = p.title;
             row.appendChild(make('span', 'lq-health-provider__name', p.name));
-            row.appendChild(make('span', 'lq-health-provider__ok', p.ok));
-            row.appendChild(make('span', 'lq-health-provider__empty', p.empty));
-            row.appendChild(make('span', 'lq-health-provider__problems lq-health-provider__problems--' + p.tone, p.problems));
+            row.appendChild(make('span', 'lq-text--success', p.ok));
+            row.appendChild(make('span', 'lq-text--muted', p.empty));
+            row.appendChild(make('span', textTone(p.tone), p.problems));
             holder.appendChild(row);
         });
     }

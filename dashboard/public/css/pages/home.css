@@ -33,11 +33,11 @@
 .lq-home-funnel__body {
     display: flex;
     flex-direction: column;
-    gap: 14px;
+    gap: var(--lq-space-4);
 }
 
 .lq-home-funnel__legend {
-    gap: var(--lq-space-2) 18px;
+    gap: var(--lq-space-2) var(--lq-space-4);
     font-size: var(--lq-fs-xs);
 }
 
@@ -131,7 +131,7 @@
     }
 
     .lq-home__kpis .lq-kpi {
-        padding: 14px;
+        padding: var(--lq-space-3);
     }
 
     .lq-today-tools__tab {
@@ -168,7 +168,7 @@
     display: flex;
     flex: 1 1 22em;
     flex-direction: column;
-    gap: 6px;
+    gap: var(--lq-space-2);
     min-width: 0;
 }
 
@@ -182,7 +182,7 @@
 .lq-home-setup__steps {
     display: flex;
     flex-wrap: wrap;
-    gap: 6px var(--lq-space-4);
+    gap: var(--lq-space-2) var(--lq-space-4);
     margin: 0;
     padding: 0;
     list-style: none;
@@ -193,7 +193,7 @@
 .lq-home-setup__step {
     display: inline-flex;
     align-items: center;
-    gap: 6px;
+    gap: var(--lq-space-2);
 }
 
 .lq-home-setup__step[data-status="ok"] {

@@ -216,7 +216,7 @@
 
                 <div class="lq-run-recent">
                     <div class="lq-run-recent__head">
-                        <h4 class="lq-run-recent__title">آخر النتائج</h4>
+                        <h4 class="lq-card__title">آخر النتائج</h4>
                         <a class="lq-link" href="{{ route('dashboard.catalog') }}">افتح بالمراجعة</a>
                     </div>
                     <ol class="lq-run-recent__list" data-run="recent"></ol>
