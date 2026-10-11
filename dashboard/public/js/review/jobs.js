@@ -18,6 +18,10 @@
  * state_changed, contract C1) keeps what changed (job.stale); only an explicit «replace» resends it, with replace.
  * An approval refused because the cut-out failed its check (quality_flags / background_failed) keeps the flags
  * (job.quality); presentation-only flags are published only by an explicit «publish anyway» (publish_anyway).
+ *
+ * A single-mode reject with a new search (job.unslotted) can take a minute: it is sent at once beside the approvals
+ * instead of taking one of their places, still after any other request for the same product (conflictKey).
+ * options.succeeded(job, result) decides what counts as done when the answer is not a plain «success».
  */
 (function (root) {
     'use strict';
@@ -205,15 +209,25 @@
             return !!k && Array.from(running).some(r => options.conflictKey(r) === k);
         }
 
+        // صفحة مخفية: الطلب بيروح مع keepalive إذا بتسمح الميزانية، فما بيضيع إذا انسكّرت
+        function sendOpts(job) {
+            const hidden = typeof options.hidden === 'function' && options.hidden();
+            const size = hidden ? bodySize(job) : null;
+            return size !== null && keepaliveBytes + size <= KEEPALIVE_BUDGET ? { keepalive: true, size: size } : {};
+        }
+
+        // الطلبات اللي عم تاخد محل بالدور: رفض مع بحث جديد (job.unslotted) بياخد لحد دقيقة، فما بيوقّف الاعتمادات
+        function slotsUsed() {
+            return Array.from(running).filter(j => !j.unslotted).length;
+        }
+
         function pump() {
-            while (running.size < concurrency()) {
-                const next = jobs.find(j => j.state === 'waiting' && !conflicts(j));
+            // رفض مع بحث جديد بينبعت فوراً (بس بعد أي طلب ثاني لنفس المنتج، conflictKey)
+            jobs.filter(j => j.state === 'waiting' && j.unslotted && !conflicts(j)).forEach(j => start(j, sendOpts(j)));
+            while (slotsUsed() < concurrency()) {
+                const next = jobs.find(j => j.state === 'waiting' && !j.unslotted && !conflicts(j));
                 if (!next) return;
-                // صفحة مخفية: الطلب بيروح مع keepalive إذا بتسمح الميزانية، فما بيضيع إذا انسكّرت
-                const hidden = typeof options.hidden === 'function' && options.hidden();
-                const size = hidden ? bodySize(next) : null;
-                const keep = size !== null && keepaliveBytes + size <= KEEPALIVE_BUDGET;
-                start(next, keep ? { keepalive: true, size: size } : {});
+                start(next, sendOpts(next));
             }
         }
 
@@ -232,7 +246,9 @@
             }
             if (sendOpts.keepalive) keepaliveBytes = Math.max(0, keepaliveBytes - (sendOpts.size || 0));
             running.delete(job);
-            const success = !!(result && result.ok && result.data && result.data.status === 'success');
+            // options.succeeded: الطلب انسجّل ولو جوابه مش «success» (رفض مع بحث جديد بيرجع نتيجة البحث نفسها)
+            const success = typeof options.succeeded === 'function' ? !!options.succeeded(job, result)
+                : !!(result && result.ok && result.data && result.data.status === 'success');
             job.result = result;
             job.state = success ? 'done' : 'failed';
             job.stale = null;
@@ -331,7 +347,9 @@
         }
 
         return { enqueue, enqueueMany, release, cancel, flush, retry, drop, dismiss, state, busy, accept, activeFor,
-                 has: key => !!activeFor(key), sending: () => jobs.some(sentOrQueued) };
+                 has: key => !!activeFor(key), sending: () => jobs.some(sentOrQueued),
+                 // طلب برقمه لسا باللوحة أو محجوز («آخر قراراتك»)، أو null
+                 get: id => jobs.find(j => j.id === id) || null };
     }
 
     R.createJobQueue = createJobQueue;

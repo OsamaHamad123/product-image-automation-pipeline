@@ -222,16 +222,19 @@ out.done = itemOf(70).bucket;
 
 
 @NEEDS_NODE
-def test_a_reject_with_research_still_waits_on_the_product(tmp_path):
+def test_a_reject_with_research_moves_on_and_its_product_shows_the_search_when_reopened(tmp_path):
     out = page(r"""
 openRow(70);
 press('x');
 document.getElementById('rvRejectResearch').checked = true;
 press('1');
 await flush();
-out.state = [productName(), S().ws.state, requests('/api/reject_image')[0].body.research, S().jobs.state().jobs.length];
+out.state = [productName(), requests('/api/reject_image')[0].body.research, S().jobs.state().jobs.length];
+openRow(70);
+out.back = [productName(), S().ws.state];
 """, tmp_path, config={"row": 70})
-    assert out["state"] == ["Almarai Milk 1L", "rejecting", True, 0]
+    assert out["state"] == ["Almarai Laban 1L", True, 1]
+    assert out["back"] == ["Almarai Milk 1L", "rejecting"]
 
 
 def with_alts(row, name, pick=True, n=3):

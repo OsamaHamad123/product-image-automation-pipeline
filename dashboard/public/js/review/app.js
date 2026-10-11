@@ -88,6 +88,9 @@
         modeChosen: false,
         // what the reviewer did today (this browser): the «all done» recap
         today: { approved: 0, rejected: 0 },
+        // «آخر قراراتك» (الأحدث أولاً، sessionStorage) والقائمة مفتوحة أو مسكّرة
+        history: [],
+        historyOpen: false,
         runDiff: 0,
         dom: {},
         jobs: null
@@ -193,8 +196,10 @@
         d.listToggle = el('button', { type: 'button', className: 'rv-listtoggle', id: 'rvListToggle',
                                       'aria-expanded': 'false', 'aria-controls': 'rvListBox' },
                           [el('span', { text: 'القائمة ' }), d.listCount, icon('chevron-down', 18, 2, 'rv-listtoggle__icon')]);
+        // «آخر قراراتك» تحت القائمة: بالعمود الجانبي، وعالموبايل بينطوي معها جوّا «القائمة (N)»
         d.listBox = el('div', { className: 'rv-queue__listbox', id: 'rvListBox' }, [
             d.list,
+            buildHistory(),
             el('div', { className: 'rv-queue__foot rv-keyhint' }, [el('span', { text: '↑ ↓ للتنقل بين المنتجات · Z لتكبير الصورة · ? للاختصارات' })])
         ]);
         d.queue = el('aside', { className: 'rv-queue', 'aria-label': 'قائمة المراجعة' }, [
@@ -1062,6 +1067,8 @@
         drawList();
         if (R.single && typeof R.single.updatePosition === 'function') R.single.updatePosition();
         updateTitle();
+        // «تراجع عن الرفض» بيحتاج المنتج بالقائمة: بعد كل قراءة بيتحدّث
+        renderHistory();
     }
 
     // «N بانتظار المراجعة» ورقاقات الفلتر بأعدادها، ورقاقات «السبب»
@@ -1290,6 +1297,247 @@
     R.announce = announce;
 
     // -------------------------------------------------------------------------------------------------
+    // «آخر قراراتك»: آخر HISTORY_MAX قرار بهالجلسة (اعتماد، رفض، رفع، تخطي) بالعمود الجانبي (وعالموبايل جوّا «القائمة
+    // (N)»)، كل واحد بـ«افتح»، و«تراجع» لاعتماد محجوز (jobs cancel)، و«تراجع عن الرفض» لرفض انبعت (undo-reject).
+    // sessionStorage (لهالجلسة بس): إعادة تحميل الصفحة ما بتمسحها. Ctrl+Z (⌘Z) بيتراجع عن آخر شي بينفع (undoLast)
+    // -------------------------------------------------------------------------------------------------
+
+    const HISTORY_STORE = 'laqta.review.history';
+    const HISTORY_OPEN_STORE = 'laqta.review.historyOpen';
+    const HISTORY_MAX = 20;
+    // id → الطلب نفسه (jobs.js) لهالصفحة بس: ما بينحفظ، فبعد إعادة التحميل القرار بيضل بس بلا «تراجع» لمحجوز
+    const historyJobs = new Map();
+    let historySeq = 0;
+
+    function storeGet(name) {
+        try {
+            return root.sessionStorage ? root.sessionStorage.getItem(name) : null;
+        } catch (e) {
+            return null;        // تخزين ممنوع: لهالصفحة بس
+        }
+    }
+
+    function storeSet(name, value) {
+        try {
+            if (root.sessionStorage) root.sessionStorage.setItem(name, value);
+        } catch (e) {
+            // تخزين ممنوع أو مليان: لهالصفحة بس
+        }
+    }
+
+    // بعد إعادة التحميل: اللي كان محجوز أو عم ينبعت انبعت (flush عند pagehide)، فالاعتماد «انبعت» والرفض بينفع التراجع عنه
+    function readHistory() {
+        let list = [];
+        try {
+            list = JSON.parse(storeGet(HISTORY_STORE) || '[]');
+        } catch (e) {
+            list = [];
+        }
+        if (!Array.isArray(list)) return [];
+        return list.filter(e => e && typeof e === 'object' && e.id && e.kind && e.key).slice(0, HISTORY_MAX).map(e => {
+            const status = ['held', 'sending'].includes(e.status) ? (e.kind === 'reject' ? 'done' : 'sent') : String(e.status || '');
+            return { id: String(e.id), kind: String(e.kind), key: String(e.key), row: String(e.row || ''), name: String(e.name || ''),
+                     at: Number(e.at) || 0, status: status, url: String(e.url || ''), research: !!e.research };
+        });
+    }
+
+    function saveHistory() {
+        storeSet(HISTORY_STORE, JSON.stringify(S.history || []));
+    }
+
+    // opts: { job, url, research }. الأحدث أول القائمة
+    function recordDecision(kind, item, opts) {
+        if (!item) return null;
+        opts = opts || {};
+        const p = item.product || {};
+        const job = opts.job || null;
+        const entry = { id: `${Date.now().toString(36)}-${++historySeq}`, kind: kind, key: item.key, row: String(p.row_number || ''),
+                        name: String(p.product_name || p.product_name_ar || ''), at: Date.now(),
+                        status: kind === 'skip' ? '' : (job && job.state === 'held' ? 'held' : 'sending'),
+                        url: String(opts.url || ''), research: !!opts.research };
+        if (job) historyJobs.set(entry.id, job);
+        S.history = [entry].concat(S.history || []);
+        S.history.slice(HISTORY_MAX).forEach(e => historyJobs.delete(e.id));
+        S.history = S.history.slice(0, HISTORY_MAX);
+        saveHistory();
+        renderHistory();
+        return entry;
+    }
+    R.recordDecision = recordDecision;
+
+    function entryOfJob(job) {
+        return (S.history || []).find(e => historyJobs.get(e.id) === job) || null;
+    }
+
+    // حالة القرار هلق: الطلب لسا باللوحة (محجوز / بالدور / عم ينبعت) أو اللي انسجّل آخر مرة
+    function entryState(e) {
+        const job = historyJobs.get(e.id);
+        if (e.status !== 'undone' && job && job.state === 'held') return 'held';
+        if (e.status !== 'undone' && job && (job.state === 'waiting' || job.state === 'running')) return 'sending';
+        return e.status;
+    }
+
+    function decisionSettled(job) {
+        const e = entryOfJob(job);
+        if (!e || e.status === 'undone') return;
+        e.status = job.state === 'done' ? 'done' : 'failed';
+        saveHistory();
+        renderHistory();
+    }
+    R.decisionSettled = decisionSettled;
+
+    function markUndone(e) {
+        if (!e || e.status === 'undone') return;
+        e.status = 'undone';
+        saveHistory();
+        renderHistory();
+    }
+
+    // undo-reject نجح (من أي مكان: الإشعار، لوحة المنتج، هون): آخر رفض لهالصورة صار «تراجعت»
+    function rejectUndone(key, url) {
+        markUndone((S.history || []).find(e => e.kind === 'reject' && e.key === key && e.url === url && e.status !== 'undone'));
+    }
+    R.rejectUndone = rejectUndone;
+
+    // رفض بينفع التراجع عنه: انبعت أو عم ينبعت، ومنتجه لسا بالقائمة
+    function canUnreject(e) {
+        const state = entryState(e);
+        return e.kind === 'reject' && !!e.url && (state === 'done' || state === 'sending') && !!S.byKey.get(e.key);
+    }
+
+    function historyName(e) {
+        return e.name || `صف ${e.row}`;
+    }
+
+    // «تراجع عن الرفض» من القائمة أو Ctrl+Z: سؤال سطر واحد، بعدين نفس طريق «تراجع» بإشعار الرفض
+    async function unrejectEntry(e) {
+        if (!canUnreject(e)) return false;
+        const name = historyName(e);
+        if (!(await R.ask({ title: `ترجّع صورة «${name}» للاقتراحات؟`, confirmText: 'رجّعها' }))) return false;
+        const job = historyJobs.get(e.id);
+        if (job && job.type === 'reject' && job.state !== 'done') {
+            // لسا ما وصل جوابه: بينشال أول ما يوصل (settleJob)
+            R.single.undoBackgroundReject(job);
+            announce(`رح نتراجع عن رفض «${name}» أول ما يخلص.`);
+            return true;
+        }
+        const done = job && job.type === 'reject' ? await R.single.undoRejected(job)
+            : await R.single.undoReject(S.byKey.get(e.key), e.url, { ask: false });
+        if (done) {
+            markUndone(e);
+            announce(`تراجعت عن رفض «${name}».`);
+        }
+        return done;
+    }
+
+    function cancelHeld(group, name) {
+        const taken = S.jobs ? S.jobs.cancel(group) : [];
+        if (taken.length) announce(taken.length === 1 ? `تراجعت عن «${name || taken[0].label}».` : `تراجعت عن ${imagesText(taken.length)}.`);
+        return taken.length > 0;
+    }
+
+    // Ctrl+Z: آخر شي لسا بينفع التراجع عنه. أول شي اعتماد (أو رفض بالجملة) محجوز، وإلا آخر رفض انبعت (بعد سؤال)
+    function undoLast() {
+        const held = S.jobs ? S.jobs.state().held : [];
+        if (held.length) return cancelHeld(held[held.length - 1].group);
+        const e = (S.history || []).find(canUnreject);
+        if (e) return unrejectEntry(e);
+        announce('ما في شي تتراجع عنه هلق.');
+        R.toast('ما في شي تتراجع عنه هلق.', 'info');
+        return false;
+    }
+    R.undoLast = undoLast;
+
+    function openFromHistory(e) {
+        if (!S.byKey.get(e.key)) {
+            R.toast(`«${historyName(e)}» مش بالقائمة هلق.`, 'info');
+            return;
+        }
+        if (S.mode !== 'single') {
+            setMode('single', { key: e.key });
+            return;
+        }
+        R.single.openItem(e.key, { from: 'list' });
+        focusWorkspace();
+        if (listStacked()) R.scrollIntoView(S.dom.ws, { block: 'start', behavior: 'smooth' });
+    }
+
+    function setHistoryOpen(open, opts) {
+        const d = S.dom;
+        S.historyOpen = !!open;
+        if (!d.historyToggle) return;
+        d.historyToggle.setAttribute('aria-expanded', S.historyOpen ? 'true' : 'false');
+        d.historyList.hidden = !S.historyOpen;
+        if (opts && opts.remember) storeSet(HISTORY_OPEN_STORE, S.historyOpen ? '1' : '0');
+    }
+
+    const HISTORY_VERB = { approve: 'اعتمدت', upload: 'رفعت صورة لـ', reject: 'رفضت', skip: 'تخطيت' };
+    const HISTORY_STATE = { held: 'بتنبعت بعد شوي', sending: 'عم تنبعت', failed: 'ما زبطت', undone: 'تراجعت' };
+
+    function clockText(ms) {
+        const t = new Date(ms);
+        const pad = n => String(n).padStart(2, '0');
+        return isFinite(t.getTime()) ? `${pad(t.getHours())}:${pad(t.getMinutes())}` : '';
+    }
+
+    function renderHistory() {
+        const d = S.dom;
+        if (!d.history) return;
+        const list = S.history || [];
+        d.history.hidden = !list.length;
+        d.historyCount.textContent = `(${list.length})`;
+        // التركيز كان على زر جوّا القائمة: بيرجع لنفس الزر بعد الرسم
+        const active = document.activeElement;
+        const focusAt = active && d.historyList.contains(active) && active.getAttribute
+            ? [active.getAttribute('data-hid'), active.getAttribute('data-act')] : null;
+        clear(d.historyList);
+        list.forEach(e => {
+            const state = entryState(e);
+            const job = historyJobs.get(e.id);
+            const stateText = state === 'sending' && e.kind === 'reject' && e.research ? 'عم ندوّر على بدائل' : (HISTORY_STATE[state] || '');
+            const btn = (act, text, onClick, extra) => el('button', Object.assign({
+                type: 'button', className: 'lq-btn lq-btn--ghost lq-btn--sm rv-history__btn', dataset: { hid: e.id, act: act },
+                text: text, onclick: onClick }, extra || {}));
+            d.historyList.appendChild(el('li', { className: `rv-history__item is-${e.kind}${state ? ` is-${state}` : ''}` }, [
+                el('span', { className: 'rv-history__text' }, [
+                    `${HISTORY_VERB[e.kind] || ''} `, bdi(historyName(e), 'rv-history__name', 'auto'),
+                    el('span', { className: 'rv-history__meta', text: ` · صف ${e.row} · ${clockText(e.at)}${stateText ? ` · ${stateText}` : ''}` })
+                ]),
+                el('span', { className: 'rv-history__actions' }, [
+                    btn('open', 'افتح', () => openFromHistory(e), { 'aria-label': `افتح «${historyName(e)}»` }),
+                    state === 'held' && job
+                        ? btn('undo', 'تراجع', () => cancelHeld(job.group, historyName(e)), { 'aria-label': `تراجع عن «${historyName(e)}»` }) : null,
+                    canUnreject(e)
+                        ? btn('unreject', 'تراجع عن الرفض', () => unrejectEntry(e), { 'aria-label': `تراجع عن رفض «${historyName(e)}»` }) : null
+                ])
+            ]));
+        });
+        if (focusAt) {
+            const again = Array.from(d.historyList.querySelectorAll('button')).find(b => b.getAttribute('data-hid') === focusAt[0]
+                                                                                 && b.getAttribute('data-act') === focusAt[1])
+                || d.historyToggle;
+            if (again && typeof again.focus === 'function') again.focus();
+        }
+    }
+    R.renderHistory = renderHistory;
+
+    function buildHistory() {
+        const d = S.dom;
+        d.historyCount = el('span', { className: 'rv-history__count', text: '' });
+        d.historyToggle = el('button', { type: 'button', className: 'rv-history__toggle', id: 'rvHistoryToggle',
+                                         'aria-expanded': 'false', 'aria-controls': 'rvHistoryList' },
+                             [el('span', { text: 'آخر قراراتك ' }), d.historyCount, icon('chevron-down', 16, 2, 'rv-history__icon')]);
+        d.historyList = el('ol', { className: 'rv-history__list', id: 'rvHistoryList', 'aria-label': 'آخر قراراتك', hidden: true });
+        d.history = el('section', { className: 'rv-history', id: 'rvHistory', 'aria-label': 'آخر قراراتك', hidden: true },
+                       [d.historyToggle, d.historyList]);
+        d.historyToggle.addEventListener('click', () => setHistoryOpen(!S.historyOpen, { remember: true }));
+        S.history = readHistory();
+        setHistoryOpen(storeGet(HISTORY_OPEN_STORE) === '1');
+        renderHistory();
+        return d.history;
+    }
+
+    // -------------------------------------------------------------------------------------------------
     // Background approvals panel, and «تراجع» while an approval is held (jobs.js holdMs)
     // -------------------------------------------------------------------------------------------------
 
@@ -1441,6 +1689,7 @@
     // «تراجع»: الاعتمادات اللي لسا ما انبعتت بترجع متل ما كانت (ولا طلب وصل للخادم)
     function undoApprovals(jobs) {
         jobs.forEach(job => {
+            markUndone(entryOfJob(job));
             if (S.local.get(job.key) === 'approving') S.local.delete(job.key);
             if (job.tick) S.bulk.selected.add(job.tick);
             S.bulk.reviewed.delete(job.key);
@@ -1488,6 +1737,8 @@
             bodySize: job => R.single.jobBodySize(job),
             hidden: pageHidden,
             onSettle: job => R.single.settleJob(job),
+            // رفض مع بحث جديد: انسجّل لما يرجع الخادم نتيجة البحث (مش بس «success»)
+            succeeded: (job, res) => R.single.jobSucceeded(job, res),
             // رفض بالخلفية بوضع منتج واحد (localOnly) بيحدّث منتجه بما قاله الخادم: ما بيقرا القائمة كلها من جديد
             onDrain: st => {
                 if (!st.batchJobs.length || !st.batchJobs.every(j => j.type === 'reject' && j.localOnly)) loadData({ quiet: true });
@@ -1502,6 +1753,7 @@
             },
             onUpdate: st => {
                 renderJobs(st);
+                renderHistory();
                 // الجلسة منتهية: اللافتة بتعدّ اللي ما انبعت أو فشل لحد هلق
                 if (R.sessionExpired()) R.showSessionBanner(unsentLabels());
             }
@@ -1795,14 +2047,14 @@
         single: [
             ['Enter', 'اعتماد الصورة المختارة'], ['X', 'رفض (وبعدها 1–9 للسبب)'], ['S', 'تخطي للمنتج التالي'],
             ['↑ ↓', 'المنتج اللي قبل / بعد'], ['1–9', 'اختيار صورة من تحت (بدون اعتماد)'], ['Z', 'تكبير الصورة ومقارنتها بالشيت'],
-            ['+ − 0', 'بالتكبير: كبّر، صغّر، رجّع'], ['Esc', 'سكّر أي نافذة'], ['Ctrl+K أو /', 'روح لـ… (أي صفحة أو منتج)'],
-            ['?', 'هالقائمة']
+            ['+ − 0', 'بالتكبير: كبّر، صغّر، رجّع'], ['Esc', 'سكّر أي نافذة'], ['Ctrl+Z أو ⌘Z', 'تراجع عن آخر قرار'],
+            ['Ctrl+K أو /', 'روح لـ… (أي صفحة أو منتج)'], ['?', 'هالقائمة']
         ],
         bulk: [
             ['← → ↑ ↓', 'التنقل بين البطاقات'], ['مسافة', 'تحديد البطاقة'], ['Shift + ضغطة', 'تحديد كل اللي بيناتهم'],
             ['Enter أو A', 'اعتماد البطاقة'], ['Shift+A', 'اعتماد المحددة بلا تحذير'], ['X أو R', 'رفض البطاقة (وبعدها 1–7 للسبب)'],
             ['Z', 'تكبير الصورة ومقارنتها بالشيت'], ['+ − 0', 'بالتكبير: كبّر، صغّر، رجّع'], ['Esc', 'سكّر أي نافذة'],
-            ['Ctrl+K أو /', 'روح لـ… (أي صفحة أو منتج)'], ['?', 'هالقائمة']
+            ['Ctrl+Z أو ⌘Z', 'تراجع عن آخر قرار'], ['Ctrl+K أو /', 'روح لـ… (أي صفحة أو منتج)'], ['?', 'هالقائمة']
         ]
     };
 
@@ -2065,12 +2317,19 @@
             if (!e.ctrlKey && !e.metaKey && !e.altKey) R.bulk.dialogKey(e, key);
             return;
         }
-        if (e.ctrlKey || e.metaKey || e.altKey) return;
         const active = document.activeElement;
         const tag = active && active.tagName ? String(active.tagName).toLowerCase() : '';
         const inputType = tag === 'input' ? String(active.type || active.getAttribute('type') || 'text').toLowerCase() : '';
         const typing = (tag === 'input' && !['checkbox', 'radio', 'button', 'submit', 'reset', 'range', 'color', 'file'].includes(inputType))
             || tag === 'textarea' || tag === 'select' || !!(active && active.isContentEditable);
+        // Ctrl+Z (⌘Z): تراجع عن آخر قرار (undoLast). بحقل كتابة بيضل للمتصفح (تراجع عن الكتابة)
+        if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && key === 'z') {
+            if (typing || (S.mode !== 'single' && S.mode !== 'bulk')) return;
+            e.preventDefault();
+            if (!e.repeat) undoLast();
+            return;
+        }
+        if (e.ctrlKey || e.metaKey || e.altKey) return;
         if (key === 'Escape') {
             if (toggleMoreMenu(false)) return;
             if (R.bulk.toggleMenu && R.bulk.toggleMenu(false)) return;
